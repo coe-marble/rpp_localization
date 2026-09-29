@@ -1,0 +1,33 @@
+rosbag2_bagfile_information:
+  compression_format: ''
+  compression_mode: ''
+  custom_data: {}
+  duration:
+    nanoseconds: 123033146171
+  files:
+  - duration:
+      nanoseconds: 123033146171
+    message_count: 44598
+    path: test3.db3
+    starting_time:
+      nanoseconds_since_epoch: 1381518692966203289
+  message_count: 44598
+  relative_file_paths:
+  - test3.db3
+  starting_time:
+    nanoseconds_since_epoch: 1381518692966203289
+  storage_identifier: sqlite3
+  topics_with_message_count:
+  - message_count: 22298
+    topic_metadata:
+      name: /ardrone/odometry/raw
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: nav_msgs/msg/Odometry
+  - message_count: 22300
+    topic_metadata:
+      name: /ardrone/imu
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: sensor_msgs/msg/Imu
+  version: 6

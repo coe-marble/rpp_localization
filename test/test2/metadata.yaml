@@ -1,0 +1,33 @@
+rosbag2_bagfile_information:
+  compression_format: ''
+  compression_mode: ''
+  custom_data: {}
+  duration:
+    nanoseconds: 61201000000
+  files:
+  - duration:
+      nanoseconds: 61201000000
+    message_count: 6121
+    path: test2.db3
+    starting_time:
+      nanoseconds_since_epoch: 47580000000
+  message_count: 6121
+  relative_file_paths:
+  - test2.db3
+  starting_time:
+    nanoseconds_since_epoch: 47580000000
+  storage_identifier: sqlite3
+  topics_with_message_count:
+  - message_count: 3061
+    topic_metadata:
+      name: /imu/data
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: sensor_msgs/msg/Imu
+  - message_count: 3060
+    topic_metadata:
+      name: /jackal_velocity_controller/odom
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: nav_msgs/msg/Odometry
+  version: 6

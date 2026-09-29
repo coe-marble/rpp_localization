@@ -1,0 +1,39 @@
+rosbag2_bagfile_information:
+  compression_format: ''
+  compression_mode: ''
+  custom_data: {}
+  duration:
+    nanoseconds: 395307116140
+  files:
+  - duration:
+      nanoseconds: 395307116140
+    message_count: 16806
+    path: test1.db3
+    starting_time:
+      nanoseconds_since_epoch: 1432235498025043042
+  message_count: 16806
+  relative_file_paths:
+  - test1.db3
+  starting_time:
+    nanoseconds_since_epoch: 1432235498025043042
+  storage_identifier: sqlite3
+  topics_with_message_count:
+  - message_count: 11865
+    topic_metadata:
+      name: /imu/data
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: sensor_msgs/msg/Imu
+  - message_count: 3952
+    topic_metadata:
+      name: /husky_velocity_controller/odom
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: nav_msgs/msg/Odometry
+  - message_count: 989
+    topic_metadata:
+      name: /fix
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: sensor_msgs/msg/NavSatFix
+  version: 6
