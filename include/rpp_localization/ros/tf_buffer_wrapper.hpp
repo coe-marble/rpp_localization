@@ -4,7 +4,7 @@
 #include "tf2/time.h"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 
-#include "rpp_localization/core/filter_utilities.hpp"
+#include "rpp_localization/ros/time.hpp"
 
 
 namespace rpp_localization
@@ -72,11 +72,11 @@ namespace rpp_localization
         const bool silent=false)
       {
         bool retVal = true;
-        tf2::TimePoint time_tf = tf2::timeFromSec(filter_utilities::toSec(time));
+        tf2::TimePoint time_tf = tf2::timeFromSec(ros::toSeconds(time));
 
 
           tf2::Duration duration_tf =
-            tf2::durationFromSec(filter_utilities::toSec(duration));
+            tf2::durationFromSec(ros::toSeconds(duration));
 
         // First try to transform the data at the requested time
         try

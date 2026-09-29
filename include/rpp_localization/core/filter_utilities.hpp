@@ -11,8 +11,6 @@
 #include <vector>
 
 #include "Eigen/Dense"
-#include "rclcpp/time.hpp"
-#include "std_msgs/msg/header.hpp"
 
 #define FB_DEBUG(msg) \
   if (get_debug()) { \
@@ -53,31 +51,6 @@ inline void appendPrefix(const std::string & tf_prefix, std::string & frame_id)
   if (!tf_prefix.empty()) {
     frame_id = tf_prefix.substr(tf_prefix_index) + "/" + frame_id.substr(frame_id_prefix_index);
   }
-}
-
-inline double nanosecToSec(const rcl_time_point_value_t nanoseconds)
-{
-  return static_cast<double>(nanoseconds) * 1e-9;
-}
-
-inline int secToNanosec(const double seconds)
-{
-  return static_cast<int>(seconds * 1e9);
-}
-
-inline double toSec(const rclcpp::Duration & duration)
-{
-  return nanosecToSec(duration.nanoseconds());
-}
-
-inline double toSec(const rclcpp::Time & time)
-{
-  return nanosecToSec(time.nanoseconds());
-}
-
-inline double toSec(const std_msgs::msg::Header::_stamp_type & stamp)
-{
-  return static_cast<double>(stamp.sec) + nanosecToSec(stamp.nanosec);
 }
 
 bool check_mahalanobis_threshold(

@@ -1,23 +1,22 @@
 #pragma once
 
-#include <Eigen/Dense>
+#include "rpp_localization/core/types.hpp"
 
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <rclcpp/time.hpp>
 
 namespace rpp_localization
 {
 
-// Compatibility representation of the legacy queued measurement. This remains
-// ROS-time based until the later ROS-free core extraction.
+// Compatibility representation of the legacy queued measurement. Timestamps use
+// the ROS-independent core nanosecond clock.
 struct ControlCommand
 {
-  rclcpp::Time stamp;
-  Eigen::VectorXd control;
+  TimestampNs stamp;
+  ControlVector control;
 };
 
 struct Measurement
@@ -30,13 +29,13 @@ struct Measurement
   {
   }
 
-  rclcpp::Time time_;
+  TimestampNs time_;
   double mahalanobis_thresh_;
   std::string topic_name_;
   std::vector<bool> update_vector_;
   ControlCommand latest_control_;
-  Eigen::VectorXd measurement_;
-  Eigen::MatrixXd covariance_;
+  MeasurementVector measurement_;
+  CovarianceMatrix covariance_;
 
   // Earlier measurements have greater priority.
   bool operator()(

@@ -14,6 +14,7 @@
 #include "rclcpp/time.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rpp_localization/core/measurement.hpp"
+#include "rpp_localization/core/runtime_filter.hpp"
 
 namespace rpp_localization
 {
@@ -28,13 +29,11 @@ public:
 
   void reset();
 
-  void init(std::shared_ptr<rclcpp::Node> node);
+  void init(rclcpp::Node& node);
 
   void correct(const Measurement & measurement);
 
-  void predict(
-    const rclcpp::Time & reference_time,
-    const rclcpp::Duration & delta);
+  void predict(TimestampNs reference_time, DurationNs delta);
 
   void process_measurement(const Measurement & measurement);
 
@@ -49,17 +48,17 @@ public:
 
   bool get_initialized_status();
   T& get_filter();
-  void load_params();
+  void load_params(rclcpp::Node& node);
   const Eigen::VectorXd& get_state();
   const Eigen::MatrixXd & get_estimate_error_covariance();
 
 
-  const rclcpp::Time& get_last_measurement_time();
+  TimestampNs get_last_measurement_time();
   const rclcpp::Duration& get_sensor_timeout();
 
 
   void set_debug(const bool debug, std::ostream * out_stream = nullptr);
-  void set_last_measurement_time(const rclcpp::Time & last_measurement_time);
+  void set_last_measurement_time(TimestampNs last_measurement_time);
   void set_sensor_timeout(const rclcpp::Duration & sensor_timeout);
   void set_state(const Eigen::VectorXd & state);
   void set_estimate_error_covariance(const Eigen::MatrixXd & estimate_error_covariance);
@@ -76,10 +75,9 @@ private:
   bool _use_control;
   T _filter;
 
-  rclcpp::Time _last_measurement_time;
+  TimestampNs _last_measurement_time;
   rclcpp::Duration _sensor_timeout;
   std::ostream* _debug_stream;
-  std::shared_ptr<rclcpp::Node> _node;
 
   /**
   * @brief Covariance matrices can be incredibly unstable. We can add a small

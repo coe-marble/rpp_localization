@@ -39,7 +39,7 @@ public:
     ~InertialProcess();
 
     // Overriding from NavModelBase
-    void init(std::shared_ptr<rclcpp::Node> node) override;
+    void init(rclcpp::Node& node);
     void step(Eigen::VectorXd& state, Eigen::MatrixXd& state_covariance, const rclcpp::Time & reference_time, const double dT) override;
 
     // Setting Input Control Noise and Biases
@@ -56,7 +56,7 @@ public:
 
 
 private:
-    void load_params();
+    void load_params(rclcpp::Node& node);
 
     // Define gravitational vector (optional since rpp_localization has this function)
     Eigen::Vector3d g_ = (Eigen::Vector3d() << 0,0,-9.81).finished();

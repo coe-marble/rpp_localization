@@ -2,7 +2,7 @@
 #define RPP_LOCALIZATION__FILTER_RESULT_HPP_
 
 
-#include <Eigen/Dense>
+#include "rpp_localization/core/types.hpp"
 #include <vector>
 
 namespace rpp_localization
@@ -10,8 +10,8 @@ namespace rpp_localization
 
   struct FilterResult
   {
-    std::vector<Eigen::VectorXd> states;
-    std::vector<Eigen::MatrixXd> covariances;
+    std::vector<StateVector> states;
+    std::vector<CovarianceMatrix> covariances;
     std::vector<double> timestamps;
   };
 

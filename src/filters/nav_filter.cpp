@@ -22,6 +22,8 @@
 #include "rpp_localization/inekf/inekf.hpp"
 #include "rpp_localization/inekf/inertial_process.hpp"
 #include "rpp_localization/core/measurement.hpp"
+#include "rpp_localization/core/validation.hpp"
+#include "rpp_localization/ros/time.hpp"
 
 
 
@@ -31,7 +33,7 @@ namespace rpp_localization
 template<class T>
 NavFilter<T>::NavFilter()
 : _initialized(false),
-  _last_measurement_time(0, 0, RCL_ROS_TIME),
+  _last_measurement_time(0),
   _sensor_timeout(0, 0u),
   _debug_stream(nullptr),
   _debug(false),
@@ -41,10 +43,9 @@ NavFilter<T>::NavFilter()
 }
 
 template<class T>
-void NavFilter<T>::init(std::shared_ptr<rclcpp::Node> node)
+void NavFilter<T>::init(rclcpp::Node& node)
 {
-  _node = node;
-  load_params();
+  load_params(node);
   _filter.init(node);
 }
 
@@ -69,7 +70,7 @@ void NavFilter<T>::reset()
   _sensor_timeout = rclcpp::Duration::from_seconds(0.033333333);
 
   // Initialize our last update and measurement times
-  _last_measurement_time = rclcpp::Time(0, 0, RCL_ROS_TIME);
+  _last_measurement_time = 0;
 
 }
 
@@ -85,7 +86,7 @@ template<class T>
 T& NavFilter<T>::get_filter() { return _filter;}
 
 template<class T>
-const rclcpp::Time & NavFilter<T>::get_last_measurement_time()
+TimestampNs NavFilter<T>::get_last_measurement_time()
 {
   return _last_measurement_time;
 }
@@ -110,10 +111,10 @@ void NavFilter<T>::correct(const Measurement & measurement)
 
 template<class T>
 void NavFilter<T>::predict(
-  const rclcpp::Time & reference_time,
-  const rclcpp::Duration & delta)
+  const TimestampNs reference_time,
+  const DurationNs delta)
 {
-  _filter.predict(reference_time, delta);
+  static_cast<RuntimeFilter&>(_filter).predict(reference_time, delta);
 }
 
 template<class T>
@@ -162,7 +163,8 @@ void NavFilter<T>::process_measurement(const Measurement & measurement)
     "------ FilterBase::process_measurement (" << measurement.topic_name_ <<
       ") ------\n");
 
-  rclcpp::Duration delta(0, 0u);
+  DurationNs delta = 0;
+  auto measurement_time_status = validation::MeasurementTimeStatus::kCurrent;
 
   // If we've had a previous reading, then go through the predict/update
   // cycle. Otherwise, set our state and covariance to whatever we get
@@ -170,19 +172,21 @@ void NavFilter<T>::process_measurement(const Measurement & measurement)
   if (_initialized) {
     // Determine how much time has passed since our last measurement
     delta = measurement.time_ - _last_measurement_time;
+    measurement_time_status = validation::classifyMeasurementDelta(delta);
 
     FB_DEBUG(
       "Filter is already initialized. Carrying out predict/correct loop...\n"
       "Measurement time is " <<
-        std::setprecision(20) << measurement.time_.nanoseconds() <<
-        ", last measurement time is " << _last_measurement_time.nanoseconds() <<
-        ", delta is " << delta.nanoseconds() << "\n");
+        std::setprecision(20) << measurement.time_ <<
+        ", last measurement time is " << _last_measurement_time <<
+        ", delta is " << delta << "\n");
 
     // Only want to carry out a prediction if it's
     // forward in time. Otherwise, just correct.
-    if (delta > rclcpp::Duration(0, 0u)) {
-      validate_delta(delta);
-      predict(measurement.time_, delta);
+    if (measurement_time_status == validation::MeasurementTimeStatus::kForward) {
+      rclcpp::Duration ros_delta = ros::toRosDuration(delta);
+      validate_delta(ros_delta);
+      predict(measurement.time_, ros_delta.nanoseconds());
 
       // Return this to the user
     }
@@ -214,7 +218,7 @@ void NavFilter<T>::process_measurement(const Measurement & measurement)
     _initialized = true;
   }
 
-  if (delta >= rclcpp::Duration(0, 0u)) {
+  if (measurement_time_status != validation::MeasurementTimeStatus::kStale) {
     // Update the last measurement and update time.
     // The measurement time is based on the time stamp of the
     // measurement, whereas the update time is based on this
@@ -247,7 +251,7 @@ void NavFilter<T>::set_debug(const bool debug, std::ostream * out_stream)
 
 template<class T>
 void NavFilter<T>::set_last_measurement_time(
-  const rclcpp::Time & last_measurement_time)
+  const TimestampNs last_measurement_time)
 {
   _last_measurement_time = last_measurement_time;
 }
@@ -291,18 +295,18 @@ void NavFilter<T>::set_estimate_error_covariance(
 
 
 template<class T>
-void NavFilter<T>::load_params()
+void NavFilter<T>::load_params(rclcpp::Node& node)
 {
 
-  if (!_node->has_parameter("use_control"))
+  if (!node.has_parameter("use_control"))
   {
-    _node->declare_parameter("use_control", false);
+    node.declare_parameter("use_control", false);
   }
-  _node->get_parameter("use_control", _use_control);
+  node.get_parameter("use_control", _use_control);
 
 
   Eigen::MatrixXd estimate_error_covariance(STATE_SIZE, STATE_SIZE);
-  ros_filter_utilities::load_covariance_parameter(*_node, "initial_estimate_covariance", estimate_error_covariance);
+  ros_filter_utilities::load_covariance_parameter(node, "initial_estimate_covariance", estimate_error_covariance);
   set_estimate_error_covariance(estimate_error_covariance);
   FB_DEBUG("Initial estimate covariance is:\n" << estimate_error_covariance << "\n");
 }

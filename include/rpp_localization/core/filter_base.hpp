@@ -2,19 +2,17 @@
 
 #include "rpp_localization/core/measurement.hpp"
 #include "rpp_localization/core/model_base.hpp"
+#include "rpp_localization/core/runtime_filter.hpp"
 
-#include <memory>
 #include <ostream>
 #include <stdexcept>
-
-#include <rclcpp/rclcpp.hpp>
 
 namespace rpp_localization
 {
 
 // Compatibility base for legacy filters. The model pointer is non-owning;
 // model ownership remains with each concrete filter.
-class FilterBase
+class FilterBase : public RuntimeFilter
 {
 public:
   explicit FilterBase(const int state_dim)
@@ -31,11 +29,8 @@ public:
 
   virtual ~FilterBase() = default;
 
-  virtual void init(std::shared_ptr<rclcpp::Node> node) = 0;
-  virtual void correct(const Measurement& measurement) = 0;
-  virtual void predict(
-    const rclcpp::Time& reference_time,
-    const rclcpp::Duration& delta) = 0;
+  void correct(const Measurement& measurement) override = 0;
+  void predict(TimestampNs reference_time, DurationNs delta) override = 0;
 
   [[nodiscard]] ModelBase* get_model()
   {
@@ -74,7 +69,6 @@ protected:
   int _state_dim;
   bool _debug;
   std::ostream* _debug_stream;
-  std::shared_ptr<rclcpp::Node> _node;
   ModelBase* _model_as_base;
 };
 

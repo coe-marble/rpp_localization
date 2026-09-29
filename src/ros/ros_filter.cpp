@@ -98,7 +98,7 @@ void RosFilter<T>::init()
   }
 
   // Init the last measurement time so we don't get a huge initial delta
-  this->filter_.set_last_measurement_time(this->now());
+  this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
 
   // Position publisher
   rclcpp::PublisherOptions publisher_options;
@@ -371,7 +371,7 @@ void RosFilter<T>::periodicUpdate()
 
     // Reset last measurement time so we don't get a large time delta on toggle
     if (this->filter_.get_initialized_status()) {
-      this->filter_.set_last_measurement_time(this->now());
+      this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
     }
   }
 
@@ -524,7 +524,9 @@ void RosFilter<T>::periodicUpdate()
 
   // Clear out expired history data
   if (this->smooth_lagged_data_) {
-    this->clearExpiredHistory(this->filter_.get_last_measurement_time() - this->history_length_);
+    this->clearExpiredHistory(
+      this->filter_.get_last_measurement_time() -
+      ros::toDurationNs(this->history_length_));
   }
 
   // Warn the user if the update took too long
@@ -588,7 +590,7 @@ void RosFilter<T>::setPoseCallback(
   this->filter_.set_state(measurement);
   this->filter_.set_estimate_error_covariance(measurement_covariance);
 
-  this->filter_.set_last_measurement_time(this->now());
+  this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
 
   RF_DEBUG("\n------ /RosFilter<T>::setPoseCallback ------\n");
 }

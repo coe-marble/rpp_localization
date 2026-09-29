@@ -247,7 +247,7 @@ void RosBagFilter<T>::update()
 
     // Reset last measurement time so we don't get a large time delta on toggle
     if (this->filter_.get_initialized_status()) {
-      this->filter_.set_last_measurement_time(this->now());
+      this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
     }
   }
 
@@ -287,7 +287,9 @@ void RosBagFilter<T>::update()
 
   // Clear out expired history data
   if (this->smooth_lagged_data_) {
-    this->clearExpiredHistory(this->filter_.get_last_measurement_time() - this->history_length_);
+    this->clearExpiredHistory(
+      this->filter_.get_last_measurement_time() -
+      ros::toDurationNs(this->history_length_));
   }
 }
 } // rpp_localization

@@ -9,6 +9,7 @@
 
 #include "Eigen/Dense"
 #include "rclcpp/time.hpp"
+#include "rclcpp/rclcpp.hpp"
 #include "rpp_localization/core/filter_base.hpp"
 #include "rpp_localization/core/measurement.hpp"
 
@@ -51,13 +52,11 @@ public:
    */
   ~Ukf();
 
-  void init(std::shared_ptr<rclcpp::Node> node) override;
+  void init(rclcpp::Node& node);
 
   void correct(const Measurement& measurement) override;
 
-  void predict(
-    const rclcpp::Time& reference_time,
-    const rclcpp::Duration& delta) override;
+  void predict(TimestampNs reference_time, DurationNs delta) override;
 
   void setConstants(double alpha, double kappa, double beta);
 
@@ -76,11 +75,12 @@ protected:
    * @param[in] delta - The time step over which to project
    */
   void projectSigmaPoint(
-    const rclcpp::Time & reference_time,
-    Eigen::VectorXd & sigma_point, const rclcpp::Duration & delta);
+    TimestampNs reference_time,
+    Eigen::VectorXd& sigma_point,
+    DurationNs delta);
 
 
-  void load_params();
+  void load_params(rclcpp::Node& node);
 
   void compute_dynamic_process_noise_covariance(
     const Eigen::VectorXd & state, Eigen::MatrixXd& covariance);

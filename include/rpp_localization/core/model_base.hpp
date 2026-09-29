@@ -1,22 +1,18 @@
 #pragma once
 
 #include "rpp_localization/core/measurement.hpp"
+#include "rpp_localization/core/prediction_model.hpp"
 
-#include <Eigen/Dense>
-
-#include <memory>
 #include <ostream>
 #include <stdexcept>
 #include <utility>
 
-#include <rclcpp/rclcpp.hpp>
-
 namespace rpp_localization
 {
 
-// Compatibility base for legacy navigation models. It intentionally keeps the
-// ROS lifecycle and time interfaces during the dependency-extraction phase.
-class ModelBase
+// Runtime base for navigation models. ROS lifecycle and time adaptation belong
+// to the model and adapter layers, not this core interface.
+class ModelBase : public PredictionModel
 {
 public:
   explicit ModelBase(const int state_dim)
@@ -42,26 +38,24 @@ public:
 
   virtual ~ModelBase() = default;
 
-  virtual void init(std::shared_ptr<rclcpp::Node> node) = 0;
+  void predict(
+    StateVector& state,
+    CovarianceMatrix& state_covariance,
+    TimestampNs reference_time,
+    DurationNs delta) override = 0;
 
-  void step(const rclcpp::Time& reference_time, const double delta_sec)
+  void predict(const TimestampNs reference_time, const DurationNs delta)
   {
-    step(_state, _state_covariance, reference_time, delta_sec);
+    predict(_state, _state_covariance, reference_time, delta);
   }
 
-  void step(
-    Eigen::VectorXd& state,
-    const rclcpp::Time& reference_time,
-    const double delta_sec)
+  void predict(
+    StateVector& state,
+    const TimestampNs reference_time,
+    const DurationNs delta)
   {
-    step(state, _cov_dontcare, reference_time, delta_sec);
+    predict(state, _cov_dontcare, reference_time, delta);
   }
-
-  virtual void step(
-    Eigen::VectorXd& state,
-    Eigen::MatrixXd& state_covariance,
-    const rclcpp::Time& reference_time,
-    double delta_sec) = 0;
 
   [[nodiscard]] bool use_control() const
   {

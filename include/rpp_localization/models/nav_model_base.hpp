@@ -21,7 +21,13 @@ namespace rpp_localization
 class NavModelBase : public ModelBase
 {
 public:
-    void init(std::shared_ptr<rclcpp::Node> node) override;
+    void init(rclcpp::Node& node);
+
+    void predict(
+      StateVector& state,
+      CovarianceMatrix& state_covariance,
+      TimestampNs reference_time,
+      DurationNs delta) override final;
     void reset();
 
     virtual void step(Eigen::VectorXd& state, Eigen::MatrixXd& state_covariance, const rclcpp::Time & reference_time, const double dT) = 0;
@@ -54,7 +60,7 @@ public:
 protected:
     NavModelBase(int state_dim);
 
-    void load_params();
+    void load_params(rclcpp::Node& node);
     /**
     * @brief Method for settings bounds on acceleration values derived from
     * controls
@@ -169,7 +175,6 @@ protected:
     * @brief Whether or not the filter is in debug mode
     */
     bool _debug;
-    std::shared_ptr<rclcpp::Node> _node;
     std::ostream* _debug_stream;
 };
 

@@ -15,6 +15,7 @@
 #include "rpp_localization/core/measurement.hpp"
 #include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
+#include "rpp_localization/core/validation.hpp"
 #include "rpp_localization/models/constant_acc_model.hpp"
 
 
@@ -36,9 +37,8 @@ template<class T>
 Ekf<T>::~Ekf() {}
 
 template<class T>
-void Ekf<T>::init(std::shared_ptr<rclcpp::Node> node)
+void Ekf<T>::init(rclcpp::Node& node)
 {
-  _node = node;
   _identity.resize(STATE_SIZE, STATE_SIZE);
   _identity.setIdentity();
   _model.init(node);
@@ -117,34 +117,25 @@ void Ekf<T>::correct(const Measurement & measurement)
         measurement.covariance_(update_indices[i], update_indices[j]);
     }
 
-    // Handle negative (read: bad) covariances in the measurement. Rather
-    // than exclude the measurement or make up a covariance, just take
-    // the absolute value.
-    if (measurement_covariance_subset(i, i) < 0) {
+    const auto normalized_covariance =
+      validation::normalizeMeasurementCovariance(measurement_covariance_subset(i, i));
+
+    if (validation::hasNegativeCovariance(normalized_covariance.status)) {
       FB_DEBUG(
         "WARNING: Negative covariance for index " <<
           i << " of measurement (value is" <<
           measurement_covariance_subset(i, i) <<
           "). Using absolute value...\n");
-
-      measurement_covariance_subset(i, i) =
-        ::fabs(measurement_covariance_subset(i, i));
     }
 
-    // If the measurement variance for a given variable is very
-    // near 0 (as in e-50 or so) and the variance for that
-    // variable in the covariance matrix is also near zero, then
-    // the Kalman gain computation will blow up. Really, no
-    // measurement can be completely without error, so add a small
-    // amount in that case.
-    if (measurement_covariance_subset(i, i) < 1e-9) {
+    if (validation::hasNearZeroCovariance(normalized_covariance.status)) {
       FB_DEBUG(
         "WARNING: measurement had very small error covariance for index " <<
           update_indices[i] <<
           ". Adding some noise to maintain filter stability.\n");
-
-      measurement_covariance_subset(i, i) = 1e-9;
     }
+
+    measurement_covariance_subset(i, i) = normalized_covariance.value;
   }
 
   // The state-to-measurement function, h, will now be a measurement_size x
@@ -223,12 +214,10 @@ void Ekf<T>::correct(const Measurement & measurement)
 
 template<class T>
 void Ekf<T>::predict(
-  const rclcpp::Time & reference_time,
-  const rclcpp::Duration & delta)
+  const TimestampNs reference_time,
+  const DurationNs delta)
 {
-  const double delta_sec = filter_utilities::toSec(delta);
-  // very interesting, without ModelBase it does not work...
-  _model.ModelBase::step(reference_time, delta_sec);
+  _model.ModelBase::predict(reference_time, delta);
 }  // namespace rpp_localization
 
 

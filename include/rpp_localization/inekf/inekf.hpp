@@ -27,13 +27,11 @@ class InEkf : public FilterBase
     ~InEkf();
 
 
-    void init(std::shared_ptr<rclcpp::Node> node) override;
+    void init(rclcpp::Node& node);
 
     void correct(const Measurement& measurement) override;
 
-    void predict(
-      const rclcpp::Time& reference_time,
-      const rclcpp::Duration& delta) override;
+    void predict(TimestampNs reference_time, DurationNs delta) override;
 
     bool get_debug();
     void set_debug(const bool debug, std::ostream * out_stream);

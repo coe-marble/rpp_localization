@@ -2,8 +2,9 @@
 
 ## Current baseline
 
-This package is a renamed copy of labust_localization. Its existing behavior is
-the reference for every migration step.
+This package is a renamed copy of labust_localization at
+`90750786492c802b4e6c6d36034f3432d08031af` (`Finish inekf and add biograd
+params`). Its existing behavior is the reference for every migration step.
 
 Already present:
 
@@ -17,13 +18,22 @@ Already present:
 - package, generated-service, source, test, launch, and public-header
   namespaces renamed from robot_localization to rpp_localization.
 
-Not yet validated after the package/namespace rename:
+Validation completed for the committed baseline `db32675`:
 
-- configuration and compilation;
-- the existing test suite;
-- launch and bag-replay behavior.
+- `colcon build --packages-select rpp_localization --executor sequential`
+  completed successfully;
+- the original `labust_localization` package also builds from the recorded
+  source revision;
+- focused bag replay passes for EKF and UKF bags 2 and 3;
+- EKF bag 1 has a final-position parity failure; UKF bag 1 produces NaN; and
+  the InEKF bag 1 fixture remains external and unavailable;
+- the original package replay tests also fail structurally: its bag 1 fixture
+  is external, its bags 2 and 3 omit the required parameters, and its UKF
+  replay crashes.
 
-No build or test has been run for this migration.
+These are baseline observations, not accepted behavior changes. Keep the
+legacy source and the committed rpp_localization baseline available for every
+subsequent parity check.
 
 ## Dependency-extraction status
 
@@ -73,10 +83,10 @@ semantics.
 - [x] Rename the package, public include path, code namespace, generated
       service namespace, launch/test package references, and install-visible
       library target to rpp_localization.
-- [ ] Record the source labust_localization commit used for the copy.
-- [ ] Configure and build the renamed package when authorization is given.
-- [ ] Run the existing tests unchanged when authorization is given.
-- [ ] Separate pre-existing legacy failures from rename regressions.
+- [x] Record the source labust_localization commit used for the copy.
+- [x] Configure and build the renamed package.
+- [x] Run the existing tests unchanged.
+- [x] Separate pre-existing legacy failures from rename regressions.
 
 ### 1. Extract the required legacy core types
 
@@ -90,11 +100,25 @@ semantics.
 - [x] Move the localized compatibility surface into
       include/rpp_localization/core/; keep its shared implementation utility
       in src/core/.
-- [ ] Move common state, covariance, measurement, control, time, and status
+- [x] Move common state, covariance, measurement, control, time, and status
       validation into the new core without changing defaults.
-- [ ] Remove rclcpp from the new core API; keep ROS conversions in adapters.
+- [x] Remove rclcpp from the new core API; keep ROS conversions in adapters.
+  - [x] Introduce ROS-free state, covariance, measurement, control, and
+        nanosecond types; use nanoseconds in core validation.
+  - [x] Move measurement and filter-history timestamps to the core clock, with
+        conversions at ROS adapters and the temporary legacy filter shim.
+  - [x] Define ROS-free runtime prediction/filter contracts and bridge the
+        legacy time-based bases to them.
+  - [x] Replace the ROS lifecycle and time methods on the legacy compatibility
+        model/filter bases with the runtime core interfaces.
+  - [x] Move the remaining ROS time conversion helpers out of
+        core/filter_utilities.hpp.
 - [ ] Add and run focused parity tests against the legacy reference when test
       execution is authorized.
+  - [x] Add deterministic coverage for covariance normalization, stale-time
+        classification, NavFilter queue behavior, core runtime dispatch, and ROS
+        time conversion.
+  - [ ] Run the focused coverage against the current and legacy baselines.
 
 ### 1a. Establish package boundaries
 

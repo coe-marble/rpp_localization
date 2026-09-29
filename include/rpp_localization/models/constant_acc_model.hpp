@@ -18,7 +18,7 @@ public:
 
   ~ConstantAccelerationModel();
 
-  void init(std::shared_ptr<rclcpp::Node> node) override;
+  void init(rclcpp::Node& node);
 
   /// @brief Accepts current state and state_covariance and forwards them in time
   /// @param state 

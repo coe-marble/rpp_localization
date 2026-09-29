@@ -22,37 +22,49 @@ PythonModel::~PythonModel()
 
 }
 
-void PythonModel::init(std::shared_ptr<rclcpp::Node> node)
+void PythonModel::init(rclcpp::Node& node)
 {
-    _node = node;
-    load_params();
+    load_params(node);
 
     import_py_module();
 }
 
 
+void PythonModel::predict(
+    StateVector& state,
+    CovarianceMatrix& state_covariance,
+    const TimestampNs reference_time,
+    const DurationNs delta)
+{
+    (void)state;
+    (void)state_covariance;
+    step(
+        rclcpp::Time(reference_time, RCL_ROS_TIME),
+        nanosecondsToSeconds(delta));
+}
+
 void PythonModel::step(const rclcpp::Time & reference_time, const double dT)
 {
     if (!_initialized)
     {
-        RCLCPP_ERROR(_node->get_logger(), "Cannot perform step. Model is not initialized.");
+        RCLCPP_ERROR(rclcpp::get_logger("rpp_localization.python_model"), "Cannot perform step. Model is not initialized.");
         return;
     }
 
 }
 
-void PythonModel::load_params()
+void PythonModel::load_params(rclcpp::Node& node)
 {
     auto py_package_param_name = _param_namespace + ".package";
-    _py_package_name = _node->declare_parameter(py_package_param_name, "");
+    _py_package_name = node.declare_parameter(py_package_param_name, "");
     if (_py_package_name.empty())
     {
-        RCLCPP_ERROR(_node->get_logger(), "%s parameter not set.", py_package_param_name.c_str());
+        RCLCPP_ERROR(rclcpp::get_logger("rpp_localization.python_model"), "%s parameter not set.", py_package_param_name.c_str());
         return;
     }
 
     auto py_module_param_name = _param_namespace + ".module";
-    _py_module_name = _node->declare_parameter(py_module_param_name, "");
+    _py_module_name = node.declare_parameter(py_module_param_name, "");
     std::string ext(".py");
     // check for extension and remove it
     if (std::equal(ext.rbegin(), ext.rend(), _py_module_name.rbegin()))
@@ -61,15 +73,15 @@ void PythonModel::load_params()
     }
     if (_py_module_name.empty())
     {
-        RCLCPP_ERROR(_node->get_logger(), "%s parameter not set.", py_module_param_name.c_str());
+        RCLCPP_ERROR(rclcpp::get_logger("rpp_localization.python_model"), "%s parameter not set.", py_module_param_name.c_str());
         return;
     }
 
     auto py_class_param_name = _param_namespace + ".class";
-    _py_class_name = _node->declare_parameter(py_class_param_name, "");
+    _py_class_name = node.declare_parameter(py_class_param_name, "");
     if (_py_class_name.empty())
     {
-        RCLCPP_ERROR(_node->get_logger(), "%s parameter not set.", py_class_param_name.c_str());
+        RCLCPP_ERROR(rclcpp::get_logger("rpp_localization.python_model"), "%s parameter not set.", py_class_param_name.c_str());
         return;
     }
 

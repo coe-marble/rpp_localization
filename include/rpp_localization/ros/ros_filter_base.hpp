@@ -36,6 +36,7 @@
 #include "rpp_localization/core/measurement.hpp"
 #include "rpp_localization/filters/nav_filter.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
+#include "rpp_localization/ros/time.hpp"
 
 namespace rpp_localization
 {
@@ -258,7 +259,7 @@ protected:
   //! @param[in] time - The time to which the filter state should revert
   //! @return True if restoring the filter succeeded. False if not.
   //!
-  bool revertTo(const rclcpp::Time & time);
+  bool revertTo(TimestampNs time);
 
 
   //! @brief Saves the current filter state in the queue of previous filter
@@ -394,7 +395,7 @@ protected:
   //! @param[in] cutoff_time - Measurements and states older than this time will
   //! be dropped.
   //!
-  void clearExpiredHistory(const rclcpp::Time cutoff_time);
+  void clearExpiredHistory(TimestampNs cutoff_time);
 
 
   void load_filter_params();

@@ -14,6 +14,7 @@
 #include "rpp_localization/core/filter_utilities.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 #include "rpp_localization/core/measurement.hpp"
+#include "rpp_localization/core/validation.hpp"
 
 
 
@@ -40,14 +41,13 @@ Ukf<T>::~Ukf() {}
 
 
 template<class T>
-void Ukf<T>::init(std::shared_ptr<rclcpp::Node> node)
+void Ukf<T>::init(rclcpp::Node& node)
 {
-  _node = node;
   _model.init(node);
   _model.set_computes_covariance(false);
   _model.set_computes_jacobian(false);
   process_noise_covariance_.setZero(STATE_SIZE, STATE_SIZE);
-  load_params();
+  load_params(node);
 
 }
 
@@ -149,34 +149,25 @@ void Ukf<T>::correct(const Measurement & measurement)
         measurement.covariance_(update_indices[i], update_indices[j]);
     }
 
-    // Handle negative (read: bad) covariances in the measurement. Rather
-    // than exclude the measurement or make up a covariance, just take
-    // the absolute value.
-    if (measurement_covariance_subset(i, i) < 0) {
+    const auto normalized_covariance =
+      validation::normalizeMeasurementCovariance(measurement_covariance_subset(i, i));
+
+    if (validation::hasNegativeCovariance(normalized_covariance.status)) {
       FB_DEBUG(
         "WARNING: Negative covariance for index " <<
           i << " of measurement (value is" <<
           measurement_covariance_subset(i, i) <<
           "). Using absolute value...\n");
-
-      measurement_covariance_subset(i, i) =
-        ::fabs(measurement_covariance_subset(i, i));
     }
 
-    // If the measurement variance for a given variable is very
-    // near 0 (as in e-50 or so) and the variance for that
-    // variable in the covariance matrix is also near zero, then
-    // the Kalman gain computation will blow up. Really, no
-    // measurement can be completely without error, so add a small
-    // amount in that case.
-    if (measurement_covariance_subset(i, i) < 1e-9) {
-      measurement_covariance_subset(i, i) = 1e-9;
-
+    if (validation::hasNearZeroCovariance(normalized_covariance.status)) {
       FB_DEBUG(
         "WARNING: measurement had very small error covariance for index " <<
           update_indices[i] <<
           ". Adding some noise to maintain filter stability.\n");
     }
+
+    measurement_covariance_subset(i, i) = normalized_covariance.value;
   }
 
   // The state-to-measurement function, h, will now be a measurement_size x
@@ -314,13 +305,13 @@ void Ukf<T>::correct(const Measurement & measurement)
 
 template<class T>
 void Ukf<T>::predict(
-  const rclcpp::Time & reference_time,
-  const rclcpp::Duration & delta)
+  const TimestampNs reference_time,
+  const DurationNs delta)
 {
   Eigen::VectorXd state = _model.get_state();
   FB_DEBUG(
     "---------------------- Ukf::predict ----------------------\n" <<
-      "delta is " << delta.seconds() << "\nstate is " << state << "\n");
+      "delta is " << nanosecondsToSeconds(delta) << "\nstate is " << state << "\n");
 
   Eigen::MatrixXd& state_covariance = _model.get_state_covariance_unsafe();
   generateSigmaPoints(state, state_covariance);
@@ -375,7 +366,7 @@ void Ukf<T>::predict(
     process_noise_covariance = &dynamic_process_noise_covariance_;
   }
 
-  state_covariance.noalias() += delta.seconds() * (*process_noise_covariance);
+  state_covariance.noalias() += nanosecondsToSeconds(delta) * (*process_noise_covariance);
   // Keep the angles bounded
   filter_utilities::wrapStateAngles(state);
 
@@ -412,12 +403,11 @@ void Ukf<T>::generateSigmaPoints(const Eigen::VectorXd& state, const Eigen::Matr
 
 template<class T>
 void Ukf<T>::projectSigmaPoint(
-  const rclcpp::Time & reference_time,
-  Eigen::VectorXd & sigma_point, const rclcpp::Duration & delta)
+  const TimestampNs reference_time,
+  Eigen::VectorXd& sigma_point,
+  const DurationNs delta)
 {
-  const double delta_sec = filter_utilities::toSec(delta);
-  // very interesting, without ModelBase it does not work...
-  _model.ModelBase::step(sigma_point, reference_time, delta_sec);
+  _model.ModelBase::predict(sigma_point, reference_time, delta);
 }
 
 
@@ -441,19 +431,19 @@ void Ukf<T>::set_debug(const bool debug, std::ostream * out_stream)
 }
 
 template<class T>
-void Ukf<T>::load_params()
+void Ukf<T>::load_params(rclcpp::Node& node)
 {
-  if (!_node->has_parameter("dynamic_process_noise_covariance"))
+  if (!node.has_parameter("dynamic_process_noise_covariance"))
   {
-    _node->declare_parameter("dynamic_process_noise_covariance", false);
+    node.declare_parameter("dynamic_process_noise_covariance", false);
   }
-  _node->get_parameter("dynamic_process_noise_covariance", _use_dynamic_process_noise_covariance);
-  ros_filter_utilities::load_covariance_parameter(*_node, "process_noise_covariance", process_noise_covariance_);
+  node.get_parameter("dynamic_process_noise_covariance", _use_dynamic_process_noise_covariance);
+  ros_filter_utilities::load_covariance_parameter(node, "process_noise_covariance", process_noise_covariance_);
   FB_DEBUG("Process noise covariance is:\n" << process_noise_covariance_ << "\n");
 
-  double alpha = _node->declare_parameter("alpha", 0.001);
-  double kappa = _node->declare_parameter("kappa", 0.0);
-  double beta = _node->declare_parameter("beta", 2.0);
+  double alpha = node.declare_parameter("alpha", 0.001);
+  double kappa = node.declare_parameter("kappa", 0.0);
+  double beta = node.declare_parameter("beta", 2.0);
   setConstants(alpha, kappa, beta);
 }
 

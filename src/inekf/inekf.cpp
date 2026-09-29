@@ -11,6 +11,7 @@
 #include "rpp_localization/core/measurement.hpp"
 #include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
+#include "rpp_localization/core/validation.hpp"
 
 
 
@@ -33,18 +34,17 @@ template<class T>
 InEkf<T>::~InEkf() {}
 
 template<class T>
-void InEkf<T>::init(std::shared_ptr<rclcpp::Node> node)
+void InEkf<T>::init(rclcpp::Node& node)
 {
-  _node = node;
   _model.init(node);
 
   // GET ERROR TYPE FROM CONFIGURATION FILE
-  _node->declare_parameter("error", "RIGHT");
-  use_pseudomeasurements_ = _node->declare_parameter("use_pseudomeasurements", false);
-  pseudomeasurement_cov_lat_ = _node->declare_parameter<double>("pseudomeasurement_variance_lat", 1.0);
-  pseudomeasurement_cov_alt_ = _node->declare_parameter<double>("pseudomeasurement_variance_alt", 10.0);
+  node.declare_parameter("error", "RIGHT");
+  use_pseudomeasurements_ = node.declare_parameter("use_pseudomeasurements", false);
+  pseudomeasurement_cov_lat_ = node.declare_parameter<double>("pseudomeasurement_variance_lat", 1.0);
+  pseudomeasurement_cov_alt_ = node.declare_parameter<double>("pseudomeasurement_variance_alt", 10.0);
   std::string error{""};
-  if(_node->get_parameter("error", error))
+  if(node.get_parameter("error", error))
   {
     if (error == "RIGHT") error_ = InEKF::RIGHT;
     else if (error == "LEFT") error_ = InEKF::LEFT;
@@ -142,27 +142,27 @@ void InEkf<T>::correct(const Measurement & measurement)
         measurement_covariance_subset(i, j) = measurement.covariance_(indices[i], indices[j]);
       }
 
-      if (measurement_covariance_subset(i, i) < 0)
+      const auto normalized_covariance =
+        validation::normalizeMeasurementCovariance(measurement_covariance_subset(i, i));
+
+      if (validation::hasNegativeCovariance(normalized_covariance.status))
       {
         FB_DEBUG(
           "WARNING: Negative covariance for index " <<
             i << " of measurement (value is" <<
             measurement_covariance_subset(i, i) <<
             "). Using absolute value...\n");
-
-        measurement_covariance_subset(i, i) =
-          ::fabs(measurement_covariance_subset(i, i));
       }
 
-      if (measurement_covariance_subset(i, i) < 1e-9)
+      if (validation::hasNearZeroCovariance(normalized_covariance.status))
       {
         FB_DEBUG(
           "WARNING: measurement had very small error covariance for index " <<
             update_indices[i] <<
             ". Adding some noise to maintain filter stability.\n");
-
-        measurement_covariance_subset(i, i) = 1e-9;
       }
+
+      measurement_covariance_subset(i, i) = normalized_covariance.value;
     }
 
     for (size_t i = 0; i < indices.size(); ++i) {
@@ -367,12 +367,10 @@ void InEkf<T>::correct(const Measurement & measurement)
 
 template<class T>
 void InEkf<T>::predict(
-  const rclcpp::Time & reference_time,
-  const rclcpp::Duration & delta)
+  const TimestampNs reference_time,
+  const DurationNs delta)
 {
-  const double delta_sec = filter_utilities::toSec(delta);
-  // very interesting, without ModelBase it does not work...TBD!!!!
-  _model.ModelBase::step(reference_time, delta_sec);
+  _model.ModelBase::predict(reference_time, delta);
   FB_DEBUG("PREDICTED MEASUREMENTS ARE :\n" << _model.get_state() << "\n");
 }  // namespace rpp_localization
 

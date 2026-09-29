@@ -22,11 +22,16 @@ class PythonModel : public ModelBase
         PythonModel(int state_dim);
         ~PythonModel();
 
-        void init(std::shared_ptr<rclcpp::Node> node) override;
-        void step(const rclcpp::Time & reference_time, const double dT) override;
+        void init(rclcpp::Node& node);
+        void step(const rclcpp::Time& reference_time, double dT);
+        void predict(
+          StateVector& state,
+          CovarianceMatrix& state_covariance,
+          TimestampNs reference_time,
+          DurationNs delta) override;
 
     private:
-        void load_params();
+        void load_params(rclcpp::Node& node);
 
         void import_py_module();
 
@@ -35,7 +40,6 @@ class PythonModel : public ModelBase
         std::string _py_package_name;
         std::string _py_module_name;
         std::string _py_class_name;
-        std::shared_ptr<rclcpp::Node> _node;
         pybind11::scoped_interpreter _interpreter_guard;
 };
 

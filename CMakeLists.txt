@@ -218,6 +218,16 @@ if(BUILD_TESTING)
   target_link_libraries(filter_base-test ${library_name})
   target_include_directories(filter_base-test PRIVATE src)
 
+  ament_add_gtest(test_core_compatibility test/test_core_compatibility.cpp)
+  target_link_libraries(test_core_compatibility ${library_name})
+
+  ament_add_gtest(test_ros_time_adapter test/test_ros_time_adapter.cpp)
+  target_link_libraries(test_ros_time_adapter ${library_name})
+
+  ament_add_gtest(test_nav_filter_timing test/test_nav_filter_timing.cpp)
+  target_link_libraries(test_nav_filter_timing ${library_name})
+  target_include_directories(test_nav_filter_timing PRIVATE src)
+
 
   #### DIAGNOSTICS TESTS ####
   ament_add_gtest_executable(test_filter_base_diagnostics_timestamps

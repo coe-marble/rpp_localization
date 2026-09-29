@@ -46,12 +46,12 @@ namespace rpp_localization::InEKF
 
     InertialProcess::~InertialProcess(){}
 
-    void InertialProcess::init(std::shared_ptr<rclcpp::Node> node)
+    void InertialProcess::init(rclcpp::Node& node)
     {
         NavModelBase::init(node);
 
         // Set error type here in load params and initial position state and covariance
-        load_params();
+        load_params(node);
         _initialized = true;
 
         // SET THIS TO
@@ -269,16 +269,16 @@ namespace rpp_localization::InEKF
         Q_.block<3,3>(12,12) = Eigen::Matrix3d::Identity() * std*std;
     }
 
-    void InertialProcess::load_params()
+    void InertialProcess::load_params(rclcpp::Node& node)
     {
         /**
          * LOAD ROS PARAMETERS FOR INITIALIZING INEKF FILTER
         */
         std::vector<double> initial_state;
-        if (_node->get_parameter("initial_state", initial_state)) {
+        if (node.get_parameter("initial_state", initial_state)) {
             if (initial_state.size() != STATE_SIZE) {
             RCLCPP_ERROR_STREAM(
-                _node->get_logger(),
+                node.get_logger(),
                 "Initial state must be of size " << STATE_SIZE << ". Provided config was of size " <<
                 initial_state.size() << ". The initial state will be ignored.");
             }

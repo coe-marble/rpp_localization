@@ -43,10 +43,22 @@ NavModelBase::NavModelBase(int state_dim)
 NavModelBase::~NavModelBase() {}
 
 
-void NavModelBase::init(std::shared_ptr<rclcpp::Node> node)
+void NavModelBase::init(rclcpp::Node& node)
 {
-  _node = node;
-  load_params();
+  load_params(node);
+}
+
+void NavModelBase::predict(
+  StateVector& state,
+  CovarianceMatrix& state_covariance,
+  const TimestampNs reference_time,
+  const DurationNs delta)
+{
+  step(
+    state,
+    state_covariance,
+    rclcpp::Time(reference_time, RCL_ROS_TIME),
+    nanosecondsToSeconds(delta));
 }
 
 
@@ -184,14 +196,14 @@ void NavModelBase::prepareControl(
   control_acceleration_.setZero();
 
   if (_use_control) {
-    bool timed_out =
-      (reference_time - _control.stamp >= _control_timeout);
+    const bool timed_out =
+      reference_time.nanoseconds() - _control.stamp >= _control_timeout.nanoseconds();
 
     if (timed_out) {
       MB_DEBUG(
         "Control timed out. Reference time was " <<
           reference_time.nanoseconds() << ", latest control time was " <<
-          _control.stamp.nanoseconds() << ", control timeout was " <<
+          _control.stamp << ", control timeout was " <<
           _control_timeout.nanoseconds() << "\n");
     }
 
@@ -254,35 +266,35 @@ NavModelBase::get_control_update_vector()
 }
 
 
-void NavModelBase::load_params()
+void NavModelBase::load_params(rclcpp::Node& node)
 {
-  if (!_node->has_parameter("use_control"))
+  if (!node.has_parameter("use_control"))
   {
-    _node->declare_parameter("use_control", false);
+    node.declare_parameter("use_control", false);
   }
-  _node->get_parameter("use_control", _use_control);
+  node.get_parameter("use_control", _use_control);
 
   auto timeout = 0.0;
-  if (!_node->has_parameter("control_timeout"))
+  if (!node.has_parameter("control_timeout"))
   {
-    _node->declare_parameter("control_timeout", timeout);
+    node.declare_parameter("control_timeout", timeout);
   }
-  _node->get_parameter("control_timeout", timeout);
+  node.get_parameter("control_timeout", timeout);
   _control_timeout = rclcpp::Duration(std::chrono::nanoseconds((long)(timeout * 1e9)));
 
 
-  if (!_node->has_parameter("dynamic_process_noise_covariance"))
+  if (!node.has_parameter("dynamic_process_noise_covariance"))
   {
-    _node->declare_parameter("dynamic_process_noise_covariance", false);
+    node.declare_parameter("dynamic_process_noise_covariance", false);
   }
-  _node->get_parameter("dynamic_process_noise_covariance", _use_dynamic_process_noise_covariance);
+  node.get_parameter("dynamic_process_noise_covariance", _use_dynamic_process_noise_covariance);
 
   if (_use_control) {
-    _node->declare_parameter("control_config", rclcpp::PARAMETER_BOOL_ARRAY);
-    if (_node->get_parameter("control_config", _control_update_vector)) {
+    node.declare_parameter("control_config", rclcpp::PARAMETER_BOOL_ARRAY);
+    if (node.get_parameter("control_config", _control_update_vector)) {
       if (_control_update_vector.size() != TWIST_SIZE) {
         RCLCPP_ERROR_STREAM(
-          _node->get_logger(),
+          node.get_logger(),
           "Control configuration must be of size " <<
             TWIST_SIZE << ". Provided config was of size " << _control_update_vector.size() <<
             ". No control term will be used.");
@@ -292,18 +304,18 @@ void NavModelBase::load_params()
     else
     {
       RCLCPP_ERROR_STREAM(
-        _node->get_logger(),
+        node.get_logger(),
         "use_control is set to true, but control_config is missing. No control term will be "
         "used.");
       _control_update_vector.resize(TWIST_SIZE, 0);
       _use_control = false;
     }
 
-    _node->declare_parameter("acceleration_limits", rclcpp::PARAMETER_DOUBLE_ARRAY);
-    if (_node->get_parameter("acceleration_limits", acceleration_limits_)) {
+    node.declare_parameter("acceleration_limits", rclcpp::PARAMETER_DOUBLE_ARRAY);
+    if (node.get_parameter("acceleration_limits", acceleration_limits_)) {
       if (acceleration_limits_.size() != TWIST_SIZE) {
         RCLCPP_ERROR_STREAM(
-          _node->get_logger(),
+          node.get_logger(),
           "Acceleration configuration must be of size " << TWIST_SIZE <<
             ". Provided config was of size " << acceleration_limits_.size() <<
             ". No control term will be used.");
@@ -311,18 +323,18 @@ void NavModelBase::load_params()
       }
     } else {
       RCLCPP_ERROR_STREAM(
-        _node->get_logger(),
+        node.get_logger(),
         "use_control is set to true, but acceleration_limits is missing. Will use default "
         "values.");
       acceleration_limits_.resize(TWIST_SIZE, 1.0);
     }
 
-    _node->declare_parameter("acceleration_gains", rclcpp::PARAMETER_DOUBLE_ARRAY);
-    if (_node->get_parameter("acceleration_gains", acceleration_gains_)) {
+    node.declare_parameter("acceleration_gains", rclcpp::PARAMETER_DOUBLE_ARRAY);
+    if (node.get_parameter("acceleration_gains", acceleration_gains_)) {
       const int size = acceleration_gains_.size();
       if (size != TWIST_SIZE) {
         RCLCPP_ERROR_STREAM(
-          _node->get_logger(),
+          node.get_logger(),
           "Acceleration gain configuration must be of size " << TWIST_SIZE << ". Provided config "
             "was of size " << size << ". All gains will be assumed to be 1.");
         std::fill_n(
@@ -332,29 +344,29 @@ void NavModelBase::load_params()
       }
     }
 
-    _node->declare_parameter("deceleration_limits", rclcpp::PARAMETER_DOUBLE_ARRAY);
-    if (_node->get_parameter("deceleration_limits", deceleration_limits_)) {
+    node.declare_parameter("deceleration_limits", rclcpp::PARAMETER_DOUBLE_ARRAY);
+    if (node.get_parameter("deceleration_limits", deceleration_limits_)) {
       if (deceleration_limits_.size() != TWIST_SIZE) {
         RCLCPP_ERROR_STREAM(
-          _node->get_logger(),
+          node.get_logger(),
           "Deceleration configuration must be of size " << TWIST_SIZE << ". Provided config was "
             "of size " << deceleration_limits_.size() << ". No control term will be used.");
         _use_control = false;
       }
     } else {
       RCLCPP_WARN_STREAM(
-        _node->get_logger(),
+        node.get_logger(),
         "use_control is set to true, but no deceleration_limits specified. Will use acceleration "
         "limits.");
       deceleration_limits_ = acceleration_limits_;
     }
 
-    _node->declare_parameter("deceleration_gains", rclcpp::PARAMETER_DOUBLE_ARRAY);
-    if (_node->get_parameter("deceleration_gains", deceleration_gains_)) {
+    node.declare_parameter("deceleration_gains", rclcpp::PARAMETER_DOUBLE_ARRAY);
+    if (node.get_parameter("deceleration_gains", deceleration_gains_)) {
       const int size = deceleration_gains_.size();
       if (size != TWIST_SIZE) {
         RCLCPP_ERROR_STREAM(
-          _node->get_logger(),
+          node.get_logger(),
           "Deceleration gain configuration must be of size " << TWIST_SIZE << ". Provided config "
             "was of size " << size << ". All gains will be assumed to be 1.");
         std::fill_n(
@@ -364,7 +376,7 @@ void NavModelBase::load_params()
       }
     } else {
       RCLCPP_WARN_STREAM(
-        _node->get_logger(),
+        node.get_logger(),
         "use_control is set to true, but no deceleration_gains specified. Will use acceleration "
         "gains.");
       deceleration_gains_ = acceleration_gains_;
@@ -378,11 +390,11 @@ void NavModelBase::load_params()
   }
 
   std::vector<double> initial_state;
-  _node->declare_parameter("initial_state", rclcpp::PARAMETER_DOUBLE_ARRAY);
-  if (_node->get_parameter("initial_state", initial_state)) {
+  node.declare_parameter("initial_state", rclcpp::PARAMETER_DOUBLE_ARRAY);
+  if (node.get_parameter("initial_state", initial_state)) {
     if (initial_state.size() != STATE_SIZE) {
       RCLCPP_ERROR_STREAM(
-        _node->get_logger(),
+        node.get_logger(),
         "Initial state must be of size " << STATE_SIZE << ". Provided config was of size " <<
           initial_state.size() << ". The initial state will be ignored.");
     }
@@ -401,13 +413,13 @@ void NavModelBase::load_params()
       _control_update_vector.end(), 0) == 0)
   {
     RCLCPP_ERROR_STREAM(
-      _node->get_logger(),
+      node.get_logger(),
       "use_control is set to true, but control_config has only false values. No control term will "
       "be used.");
     _use_control = false;
   }
 
-  ros_filter_utilities::load_covariance_parameter(*_node, "process_noise_covariance", process_noise_covariance_);
+  ros_filter_utilities::load_covariance_parameter(node, "process_noise_covariance", process_noise_covariance_);
   MB_DEBUG("Process noise covariance is:\n" << process_noise_covariance_ << "\n");
 }
 

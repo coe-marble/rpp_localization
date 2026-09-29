@@ -17,7 +17,7 @@ ConstantAccelerationModel::ConstantAccelerationModel(int state_dim)
 ConstantAccelerationModel::~ConstantAccelerationModel() {}
 
 
-void ConstantAccelerationModel::init(std::shared_ptr<rclcpp::Node> node)
+void ConstantAccelerationModel::init(rclcpp::Node& node)
 {
   NavModelBase::init(node);
   load_params();

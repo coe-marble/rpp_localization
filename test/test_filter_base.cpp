@@ -27,13 +27,13 @@ namespace rpp_localization
 class TestModel : public NavModelBase
 {
 public:
-  rclcpp::Time val;
+  TimestampNs val;
 
   TestModel(int state_dim)
   : NavModelBase(state_dim),
     val(0) {}
 
-  void init(std::shared_ptr<rclcpp::Node> node) override
+  void init(rclcpp::Node& node)
   {
     NavModelBase::init(node);
   }
@@ -49,20 +49,19 @@ template<class T>
 class FilterDerived : public FilterBase
 {
 public:
-  rclcpp::Time val;
+  TimestampNs val;
   T model;
 
   FilterDerived(int state_dim)
   : FilterBase(state_dim),
     model(state_dim),
-    val(0, 1002)
+    val(1002)
     {
       set_model_base(model);
     }
 
-  void init(std::shared_ptr<rclcpp::Node> node) override
+  void init(rclcpp::Node&)
   {
-    _node = node;
   }
 
   void correct(const Measurement & measurement)
@@ -75,9 +74,7 @@ public:
       EXPECT_EQ(measurement.update_vector_[i], true);
     }
   }
-  void predict(
-    const rclcpp::Time & /*reference_time*/,
-    const rclcpp::Duration & /*delta*/) {}
+  void predict(TimestampNs, DurationNs) override {}
 };
 
 }  // namespace rpp_localization
@@ -91,8 +88,8 @@ TEST(FilterBaseTest, MeasurementStruct) {
   Measurement meas2;
 
   EXPECT_EQ(meas1.topic_name_, std::string(""));
-  EXPECT_EQ(meas1.time_, rclcpp::Time(0));
-  EXPECT_EQ(meas2.time_, rclcpp::Time(0));
+  EXPECT_EQ(meas1.time_, 0);
+  EXPECT_EQ(meas2.time_, 0);
 
   // Comparison test is true if the first
   // argument is > the second, so should
@@ -100,16 +97,8 @@ TEST(FilterBaseTest, MeasurementStruct) {
   EXPECT_EQ(meas1(meas1, meas2), false);
   EXPECT_EQ(meas2(meas2, meas1), false);
 
-  builtin_interfaces::msg::Time msg1;
-  msg1.sec = 0;
-  msg1.nanosec = 100;
-
-  builtin_interfaces::msg::Time msg2;
-  msg2.sec = 0;
-  msg2.nanosec = 200;
-
-  meas1.time_ = msg1;
-  meas2.time_ = msg2;
+  meas1.time_ = 100;
+  meas2.time_ = 200;
 
   EXPECT_EQ(meas1(meas1, meas2), false);
   EXPECT_EQ(meas1(meas2, meas1), true);
@@ -120,7 +109,7 @@ TEST(FilterBaseTest, MeasurementStruct) {
 TEST(FilterBaseTest, DerivedFilterGetSet) {
   NavFilterDerived derived;
   auto node = rclcpp::Node::make_shared("test_filter_base");
-  derived.init(node);
+  derived.init(*node);
 
   // With the ostream argument as NULL,
   // the debug flag will remain false.
@@ -139,9 +128,9 @@ TEST(FilterBaseTest, DerivedFilterGetSet) {
   derived.set_sensor_timeout(rclcpp::Duration::from_seconds(timeout));
   EXPECT_EQ(derived.get_sensor_timeout(), rclcpp::Duration::from_seconds(timeout));
 
-  double lastMeasTime = 3.83;
-  derived.set_last_measurement_time(rclcpp::Time(lastMeasTime));
-  EXPECT_EQ(derived.get_last_measurement_time(), rclcpp::Time(lastMeasTime));
+  const auto last_measurement_time = rclcpp::Time(3.83).nanoseconds();
+  derived.set_last_measurement_time(last_measurement_time);
+  EXPECT_EQ(derived.get_last_measurement_time(), last_measurement_time);
 
   Eigen::MatrixXd pnCovar(STATE_SIZE, STATE_SIZE);
   for (size_t i = 0; i < STATE_SIZE; ++i) {
@@ -168,7 +157,7 @@ TEST(FilterBaseTest, DerivedFilterGetSet) {
 TEST(FilterBaseTest, MeasurementProcessing) {
   NavFilterDerived derived;
   auto node = rclcpp::Node::make_shared("test_filter_base");
-  derived.init(node);
+  derived.init(*node);
 
   Measurement meas;
 
@@ -188,7 +177,7 @@ TEST(FilterBaseTest, MeasurementProcessing) {
   meas.measurement_ = measurement;
   meas.covariance_ = measurementCovariance;
   meas.update_vector_.resize(10, true);
-  meas.time_ = rclcpp::Time(0, 1000);
+  meas.time_ = 1000;
 
   // The filter shouldn't be initializedyet
   EXPECT_FALSE(derived.get_filter().model.get_initialized_status());
@@ -202,7 +191,7 @@ TEST(FilterBaseTest, MeasurementProcessing) {
 
   // Process a measurement and make sure it updates the
   // lastMeasurementTime variable
-  meas.time_ = rclcpp::Time(0, 1002);
+  meas.time_ = 1002;
   derived.process_measurement(meas);
   EXPECT_EQ(derived.get_last_measurement_time(), meas.time_);
 }

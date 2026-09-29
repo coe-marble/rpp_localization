@@ -110,7 +110,7 @@ template<typename T>
 void RosFilterBase<T>::init()
 {
   // first init nav filter
-  filter_.init(shared_from_this());
+  filter_.init(*this);
   diagnostic_updater_ = std::make_unique<diagnostic_updater::Updater>(
     shared_from_this());
   diagnostic_updater_->setHardwareID("none");
@@ -231,7 +231,7 @@ void RosFilterBase<T>::accelerationCallback(
     RF_DEBUG(
       "Last message time for " <<
         topic_name << " is now " <<
-        filter_utilities::toSec(last_message_times_[topic_name]) <<
+        ros::toSeconds(last_message_times_[topic_name]) <<
         "\n");
   } else {
     // else if (reset_on_time_jump_ && rclcpp::Time::isSimTime())
@@ -252,9 +252,9 @@ void RosFilterBase<T>::accelerationCallback(
     RF_DEBUG(
       "Message is too old. Last message time for " <<
         topic_name << " is " <<
-        filter_utilities::toSec(last_message_times_[topic_name]) <<
+        ros::toSeconds(last_message_times_[topic_name]) <<
         ", current message time is " <<
-        filter_utilities::toSec(msg->header.stamp) << ".\n");
+        ros::toSeconds(msg->header.stamp) << ".\n");
   }
 
   RF_DEBUG(
@@ -287,7 +287,7 @@ void RosFilterBase<T>::controlStampedCallback(
     _latest_control.control(ControlMemberVroll) = msg->twist.angular.x;
     _latest_control.control(ControlMemberVpitch) = msg->twist.angular.y;
     _latest_control.control(ControlMemberVyaw) = msg->twist.angular.z;
-    _latest_control.stamp = msg->header.stamp;
+    _latest_control.stamp = ros::toTimestampNs(rclcpp::Time(msg->header.stamp));
 
     // Update the filter with this control term
     filter_.set_control(_latest_control);
@@ -312,7 +312,7 @@ void RosFilterBase<T>::enqueueMeasurement(
   meas->measurement_ = measurement;
   meas->covariance_ = measurement_covariance;
   meas->update_vector_ = update_vector;
-  meas->time_ = time;
+  meas->time_ = ros::toTimestampNs(time);
   meas->mahalanobis_thresh_ = mahalanobis_thresh;
   meas->latest_control_ = _latest_control;
   measurement_queue_.push(meas);
@@ -401,7 +401,7 @@ bool RosFilterBase<T>::getFilteredOdometryMessage(nav_msgs::msg::Odometry * mess
       }
     }
 
-    message->header.stamp = filter_.get_last_measurement_time();
+    message->header.stamp = ros::toRosTime(filter_.get_last_measurement_time());
     message->header.frame_id = world_frame_id_;
     message->child_frame_id = base_link_output_frame_id_;
   }
@@ -446,7 +446,7 @@ bool RosFilterBase<T>::getFilteredAccelMessage(
     }
 
     // Fill header information
-    message->header.stamp = rclcpp::Time(filter_.get_last_measurement_time());
+    message->header.stamp = ros::toRosTime(filter_.get_last_measurement_time());
     message->header.frame_id = base_link_output_frame_id_;
   }
 
@@ -576,11 +576,12 @@ void RosFilterBase<T>::integrateMeasurements(const rclcpp::Time & current_time)
   RF_DEBUG(
     "------ RosFilterBase<T>::integrateMeasurements ------\n\n"
     "Integration time is " <<
-      std::setprecision(20) << filter_utilities::toSec(current_time) <<
+      std::setprecision(20) << ros::toSeconds(current_time) <<
       "\n" <<
       measurement_queue_.size() << " measurements in queue.\n");
 
   bool predict_to_current_time = predict_to_current_time_;
+  const TimestampNs current_time_ns = ros::toTimestampNs(current_time);
 
   // If we have any measurements in the queue, process them
   if (!measurement_queue_.empty()) {
@@ -596,21 +597,21 @@ void RosFilterBase<T>::integrateMeasurements(const rclcpp::Time & current_time)
     {
       RF_DEBUG(
         "Received a measurement that was " <<
-          filter_utilities::toSec(
+          nanosecondsToSeconds(
           filter_.get_last_measurement_time() -
           first_measurement->time_) <<
           " seconds in the past. Reverting filter state and "
           "measurement queue...");
 
       int original_count = static_cast<int>(measurement_queue_.size());
-      const rclcpp::Time first_measurement_time = first_measurement->time_;
+      const TimestampNs first_measurement_time = first_measurement->time_;
       const std::string first_measurement_topic =
         first_measurement->topic_name_;
       // revertTo may invalidate first_measurement
-      if (!revertTo(first_measurement_time - rclcpp::Duration(1ns))) {
+      if (!revertTo(first_measurement_time - 1)) {
         RF_DEBUG(
           "ERROR: history interval is too small to revert to time " <<
-            filter_utilities::toSec(first_measurement_time) << "\n");
+            nanosecondsToSeconds(first_measurement_time) << "\n");
         // ROS_WARN_STREAM_DELAYED_THROTTLE(history_length_,
         //   "Received old measurement for topic " << first_measurement_topic <<
         //   ", but history interval is insufficiently sized. "
@@ -631,7 +632,7 @@ void RosFilterBase<T>::integrateMeasurements(const rclcpp::Time & current_time)
       // If we've reached a measurement that has a time later than now, it
       // should wait until a future iteration. Since measurements are stored in
       // a priority queue, all remaining measurements will be in the future.
-      if (current_time < measurement->time_) {
+      if (current_time_ns < measurement->time_) {
         break;
       }
 
@@ -673,18 +674,18 @@ void RosFilterBase<T>::integrateMeasurements(const rclcpp::Time & current_time)
     // In the event that we don't get any measurements for a long time,
     // we still need to continue to estimate our state. Therefore, we
     // should project the state forward here.
-    rclcpp::Duration last_update_delta =
-      current_time - filter_.get_last_measurement_time();
+    DurationNs last_update_delta =
+      current_time_ns - filter_.get_last_measurement_time();
 
     // If we get a large delta, then continuously predict until
-    if (last_update_delta >= filter_.get_sensor_timeout()) {
+    if (last_update_delta >= ros::toDurationNs(filter_.get_sensor_timeout())) {
       predict_to_current_time = true;
 
       RF_DEBUG(
         "Sensor timeout! Last measurement time was " <<
-          filter_utilities::toSec(filter_.get_last_measurement_time()) <<
-          ", current time is " << filter_utilities::toSec(current_time) <<
-          ", delta is " << filter_utilities::toSec(last_update_delta) <<
+          nanosecondsToSeconds(filter_.get_last_measurement_time()) <<
+          ", current time is " << ros::toSeconds(current_time) <<
+          ", delta is " << nanosecondsToSeconds(last_update_delta) <<
           "\n");
     }
   } else {
@@ -692,11 +693,13 @@ void RosFilterBase<T>::integrateMeasurements(const rclcpp::Time & current_time)
   }
 
   if (filter_.get_initialized_status() && predict_to_current_time) {
-    rclcpp::Duration last_update_delta =
-      current_time - filter_.get_last_measurement_time();
+    DurationNs last_update_delta =
+      current_time_ns - filter_.get_last_measurement_time();
 
-    filter_.validate_delta(last_update_delta);
-    filter_.predict(current_time, last_update_delta);
+    rclcpp::Duration ros_last_update_delta =
+      ros::toRosDuration(last_update_delta);
+    filter_.validate_delta(ros_last_update_delta);
+    filter_.predict(current_time_ns, ros_last_update_delta.nanoseconds());
 
     // Update the last measurement time and last update time
     filter_.set_last_measurement_time(
@@ -711,7 +714,7 @@ template<typename T>
 void RosFilterBase<T>::differentiateMeasurements(const rclcpp::Time & current_time)
 {
   if (filter_.get_initialized_status()) {
-    const double time_now = filter_utilities::toSec(current_time);
+    const double time_now = ros::toSeconds(current_time);
     const double dt = time_now - last_diff_time_;
     const Eigen::VectorXd & state = filter_.get_state();
     tf2::Vector3 new_state_twist_rot(
@@ -748,7 +751,7 @@ void RosFilterBase<T>::odometryCallback(
       " message has a timestamp equal to or before the last filter reset, " <<
       "this message will be ignored. This may indicate an empty or bad "
       "timestamp. (message time: " <<
-      filter_utilities::toSec(msg->header.stamp) << ")";
+      ros::toSeconds(msg->header.stamp) << ")";
     addDiagnostic(
       diagnostic_msgs::msg::DiagnosticStatus::WARN,
       topic_name + "_timestamp", stream.str(), false);
@@ -811,7 +814,7 @@ void RosFilterBase<T>::poseCallback(
       " message has a timestamp equal to or before the last filter reset, " <<
       "this message will be ignored. This may indicate an empty or bad "
       "timestamp. (message time: " <<
-      filter_utilities::toSec(msg->header.stamp) << ")";
+      ros::toSeconds(msg->header.stamp) << ")";
     addDiagnostic(
       diagnostic_msgs::msg::DiagnosticStatus::WARN,
       topic_name + "_timestamp", stream.str(), false);
@@ -867,7 +870,7 @@ void RosFilterBase<T>::poseCallback(
     RF_DEBUG(
       "Last message time for " <<
         topic_name << " is now " <<
-        filter_utilities::toSec(last_message_times_[topic_name]) <<
+        ros::toSeconds(last_message_times_[topic_name]) <<
         "\n");
   } else {
     // else if (reset_on_time_jump_ && rclcpp::Time::isSimTime())
@@ -886,8 +889,8 @@ void RosFilterBase<T>::poseCallback(
 
     RF_DEBUG(
       "Message is too old. Last message time for " << topic_name << " is " <<
-        filter_utilities::toSec(last_message_times_[topic_name]) <<
-        ", current message time is " << filter_utilities::toSec(msg->header.stamp) <<
+        ros::toSeconds(last_message_times_[topic_name]) <<
+        ", current message time is " << ros::toSeconds(msg->header.stamp) <<
         ".\n");
   }
 
@@ -911,7 +914,7 @@ void RosFilterBase<T>::twistCallback(
       " message has a timestamp equal to or before the last filter reset, " <<
       "this message will be ignored. This may indicate an empty or bad "
       "timestamp. (message time: " <<
-      filter_utilities::toSec(msg->header.stamp) << ")";
+      ros::toSeconds(msg->header.stamp) << ")";
     addDiagnostic(
       diagnostic_msgs::msg::DiagnosticStatus::WARN,
       topic_name + "_timestamp", stream.str(), false);
@@ -966,7 +969,7 @@ void RosFilterBase<T>::twistCallback(
     RF_DEBUG(
       "Last message time for " <<
         topic_name << " is now " <<
-        filter_utilities::toSec(last_message_times_[topic_name]) <<
+        ros::toSeconds(last_message_times_[topic_name]) <<
         "\n");
   } else {
     std::stringstream stream;
@@ -979,8 +982,8 @@ void RosFilterBase<T>::twistCallback(
 
     RF_DEBUG(
       "Message is too old. Last message time for " << topic_name << " is" <<
-        filter_utilities::toSec(last_message_times_[topic_name]) <<
-        ", current message time is " << filter_utilities::toSec(msg->header.stamp) <<
+        ros::toSeconds(last_message_times_[topic_name]) <<
+        ", current message time is " << ros::toSeconds(msg->header.stamp) <<
         ".\n");
   }
 
@@ -1648,8 +1651,8 @@ bool RosFilterBase<T>::preparePose(
 
         // 7c. Now use the time difference from the last message to compute
         // translational and rotational velocities
-        double dt = filter_utilities::toSec(msg->header.stamp) -
-          filter_utilities::toSec(last_message_times_[topic_name]);
+        double dt = ros::toSeconds(msg->header.stamp) -
+          ros::toSeconds(last_message_times_[topic_name]);
         double xVel = pose_tmp.getOrigin().getX() / dt;
         double yVel = pose_tmp.getOrigin().getY() / dt;
         double zVel = pose_tmp.getOrigin().getZ() / dt;
@@ -1667,9 +1670,9 @@ bool RosFilterBase<T>::preparePose(
 
         RF_DEBUG(
           "Previous message time was " <<
-            filter_utilities::toSec(last_message_times_[topic_name]) <<
+            ros::toSeconds(last_message_times_[topic_name]) <<
             ", current message time is " <<
-            filter_utilities::toSec(msg->header.stamp) << ", delta is " <<
+            ros::toSeconds(msg->header.stamp) << ", delta is " <<
             dt << ", velocity is (vX, vY, vZ): (" << xVel << ", " <<
             yVel << ", " << zVel << ")\n" <<
             "(vRoll, vPitch, vYaw): (" << rollVel << ", " << pitchVel <<
@@ -1956,17 +1959,17 @@ void RosFilterBase<T>::saveFilterState(NavFilter<T> & filter)
   RF_DEBUG(
     "Saved state with timestamp " <<
       std::setprecision(20) <<
-      filter_utilities::toSec(state->_last_measurement_time) <<
+      nanosecondsToSeconds(state->_last_measurement_time) <<
       " to history. " << filter_state_history_.size() <<
       " measurements are in the queue.\n");
 }
 
 template<typename T>
-void RosFilterBase<T>::clearExpiredHistory(const rclcpp::Time cutoff_time)
+void RosFilterBase<T>::clearExpiredHistory(const TimestampNs cutoff_time)
 {
   RF_DEBUG(
     "\n----- RosFilterBase<T>::clearExpiredHistory -----" <<
-      "\nCutoff time is " << filter_utilities::toSec(cutoff_time) <<
+      "\nCutoff time is " << nanosecondsToSeconds(cutoff_time) <<
       "\n");
 
   int popped_measurements = 0;
@@ -2115,12 +2118,12 @@ void RosFilterBase<T>::clearMeasurementQueue()
 }
 
 template<typename T>
-bool RosFilterBase<T>::revertTo(const rclcpp::Time & time)
+bool RosFilterBase<T>::revertTo(const TimestampNs time)
 {
   RF_DEBUG("\n----- RosFilter<T>::revertTo -----\n");
   RF_DEBUG(
     "\nRequested time was " << std::setprecision(20) <<
-      filter_utilities::toSec(time) << "\n")
+      nanosecondsToSeconds(time) << "\n")
 
   // size_t history_size = filter_state_history_.size();
 
@@ -2146,12 +2149,12 @@ bool RosFilterBase<T>::revertTo(const rclcpp::Time & time)
   } else {
     RF_DEBUG(
       "Insufficient history to revert to time " <<
-        filter_utilities::toSec(time) << "\n");
+        nanosecondsToSeconds(time) << "\n");
 
     if (last_history_state) {
       RF_DEBUG(
         "Will revert to oldest state at " <<
-          filter_utilities::toSec(last_history_state->_latest_control_time) <<
+          nanosecondsToSeconds(last_history_state->_latest_control_time) <<
           ".\n");
 
       // ROS_WARN_STREAM_DELAYED_THROTTLE(history_length_, "Could not revert "
@@ -2172,7 +2175,7 @@ bool RosFilterBase<T>::revertTo(const rclcpp::Time & time)
 
     RF_DEBUG(
       "Reverted to state with time " <<
-        filter_utilities::toSec(state->_last_measurement_time) << "\n");
+        nanosecondsToSeconds(state->_last_measurement_time) << "\n");
 
     // Repeat for measurements, but push every measurement onto the measurement
     // queue as we go
@@ -2352,13 +2355,13 @@ void RosFilterBase<T>::load_filter_params()
       "\nbase_link_frame is " << this->base_link_frame_id_ <<
       "\nbase_link_output_frame is " << this->base_link_output_frame_id_ <<
       "\nworld_frame is " << this->world_frame_id_ <<
-      "\ntransform_time_offset is " << filter_utilities::toSec(this->tf_time_offset_) <<
-      "\ntransform_timeout is " << filter_utilities::toSec(this->tf_timeout_) <<
+      "\ntransform_time_offset is " << ros::toSeconds(this->tf_time_offset_) <<
+      "\ntransform_timeout is " << ros::toSeconds(this->tf_timeout_) <<
       "\nfrequency is " << this->frequency_ <<
-      "\nsensor_timeout is " << filter_utilities::toSec(this->filter_.get_sensor_timeout()) <<
+      "\nsensor_timeout is " << ros::toSeconds(this->filter_.get_sensor_timeout()) <<
       "\ntwo_d_mode is " << (this->two_d_mode_ ? "true" : "false") <<
       "\nsmooth_lagged_data is " << (this->smooth_lagged_data_ ? "true" : "false") <<
-      "\nhistory_length is " << filter_utilities::toSec(this->history_length_) <<
+      "\nhistory_length is " << ros::toSeconds(this->history_length_) <<
       "\ninitial state is " << this->filter_.get_state() <<
       "\nprint_diagnostics is " << this->print_diagnostics_ << "\n");
 }
