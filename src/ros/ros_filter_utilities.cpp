@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: (c) 2014, 2015, 2016 Charles River Analytics, Inc.
- * SPDX-License-Identifier: BSD-3-Clause
- */
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 
 #include <iomanip>
@@ -14,13 +10,13 @@
 #include "rclcpp/time.hpp"
 #include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
-#include "tf2/LinearMath/Matrix3x3.h"
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2/LinearMath/Transform.h"
-#include "tf2/LinearMath/Vector3.h"
-#include "tf2/time.h"
+#include "tf2/LinearMath/Matrix3x3.hpp"
+#include "tf2/LinearMath/Quaternion.hpp"
+#include "tf2/LinearMath/Transform.hpp"
+#include "tf2/LinearMath/Vector3.hpp"
+#include "tf2/time.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
-#include "tf2/buffer_core.h"
+#include "tf2/buffer_core.hpp"
 
 
 using namespace rpp_localization;
@@ -93,7 +89,7 @@ namespace rpp_localization
 namespace ros_filter_utilities
 {
 
-double getYaw(const tf2::Quaternion quat)
+double get_yaw(const tf2::Quaternion quat)
 {
   tf2::Matrix3x3 mat(quat);
 
@@ -105,7 +101,7 @@ double getYaw(const tf2::Quaternion quat)
 }
 
 
-void quatToRPY(
+void quat_to_rpy(
   const tf2::Quaternion & quat, double & roll, double & pitch,
   double & yaw)
 {
@@ -113,7 +109,7 @@ void quatToRPY(
   or_tmp.getRPY(roll, pitch, yaw);
 }
 
-void stateToTF(const Eigen::VectorXd & state, tf2::Transform & state_tf)
+void state_to_tf(const Eigen::VectorXd & state, tf2::Transform & state_tf)
 {
   state_tf.setOrigin(
     tf2::Vector3(
@@ -127,12 +123,12 @@ void stateToTF(const Eigen::VectorXd & state, tf2::Transform & state_tf)
   state_tf.setRotation(quat);
 }
 
-void TFtoState(const tf2::Transform & state_tf, Eigen::VectorXd & state)
+void tf_to_state(const tf2::Transform & state_tf, Eigen::VectorXd & state)
 {
   state(StateMemberX) = state_tf.getOrigin().getX();
   state(StateMemberY) = state_tf.getOrigin().getY();
   state(StateMemberZ) = state_tf.getOrigin().getZ();
-  quatToRPY(
+  quat_to_rpy(
     state_tf.getRotation(), state(StateMemberRoll),
     state(StateMemberPitch), state(StateMemberYaw));
 }
@@ -239,7 +235,7 @@ void handle_odom_params(rclcpp::Node& node, std::ofstream* debug_stream,
       // vectors for pose and twist data, and then zero out the opposite values
       // in each vector (no pose data in the twist update vector and
       // vice-versa).
-      std::vector<bool> update_vec = loadUpdateConfig(node, odom_topic_name);
+      std::vector<bool> update_vec = load_update_config(node, odom_topic_name);
       std::vector<bool> pose_update_vec = update_vec;
       std::fill(
         pose_update_vec.begin() + POSITION_V_OFFSET,
@@ -278,7 +274,7 @@ void handle_odom_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
         RCLCPP_ERROR(node.get_logger(), stream.str().c_str());
 
-        // node->addDiagnostic(
+        // node->add_diagnostic(
         //   diagnostic_msgs::msg::DiagnosticStatus::WARN,
         //   odom_topic + "_configuration", stream.str(), true);
       }
@@ -356,7 +352,7 @@ void handle_pose_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
       // Pull in the sensor's config, zero out values that are invalid for the
       // pose type
-      std::vector<bool> pose_update_vec = loadUpdateConfig(node, pose_topic_name);
+      std::vector<bool> pose_update_vec = load_update_config(node, pose_topic_name);
       std::fill(
         pose_update_vec.begin() + POSITION_V_OFFSET,
         pose_update_vec.begin() + POSITION_V_OFFSET + TWIST_SIZE, 0);
@@ -443,7 +439,7 @@ void handle_twist_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
       // Pull in the sensor's config, zero out values that are invalid for the
       // twist type
-      std::vector<bool> twist_update_vec = loadUpdateConfig(node, twist_topic_name);
+      std::vector<bool> twist_update_vec = load_update_config(node, twist_topic_name);
       std::fill(
         twist_update_vec.begin() + POSITION_OFFSET,
         twist_update_vec.begin() + POSITION_OFFSET + POSE_SIZE, 0);
@@ -561,7 +557,7 @@ void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
       // Now pull in its boolean update vector configuration and differential
       // update configuration (as this contains pose information)
-      std::vector<bool> update_vec = loadUpdateConfig(node, imu_topic_name);
+      std::vector<bool> update_vec = load_update_config(node, imu_topic_name);
 
       // sanity checks for update config settings
       std::vector<int> position_update_vec(update_vec.begin() + POSITION_OFFSET,
@@ -710,7 +706,7 @@ void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
 }
 
-std::vector<bool> loadUpdateConfig(rclcpp::Node& node, const std::string & topic_name)
+std::vector<bool> load_update_config(rclcpp::Node& node, const std::string & topic_name)
 {
   std::vector<bool> update_vector(STATE_SIZE, 0);
   const std::string topic_config_name = topic_name + "_config";
@@ -742,7 +738,7 @@ void warn_if_misconfigured(
         ". This may result in oscillations. Please ensure that your"
         "variances for each measured variable are set appropriately.";
 
-      // this->addDiagnostic(
+      // this->add_diagnostic(
       //   diagnostic_msgs::msg::DiagnosticStatus::WARN,
       //   state_variable_names[state_var] + "_configuration",
       //   stream.str(), true);
@@ -769,7 +765,7 @@ void warn_if_misconfigured(
           "velocity is being measured. This will result in unbounded"
           "error growth and erratic filter behavior.";
 
-        // this->addDiagnostic(
+        // this->add_diagnostic(
         //   diagnostic_msgs::msg::DiagnosticStatus::ERROR,
         //   this->state_variable_names[state_var] + "_configuration",
         //   stream.str(), true);

@@ -1,7 +1,7 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
-#include "tf2/buffer_core.h"
-#include "tf2_ros/buffer.h"
-#include "tf2/time.h"
+#include "tf2/buffer_core.hpp"
+#include "tf2_ros/buffer.hpp"
+#include "tf2/time.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 
 #include "rpp_localization/ros/time.hpp"
@@ -63,7 +63,7 @@ namespace rpp_localization
       //! frame_id to itself. If any of these checks succeed, the method sets the
       //! value of @p targetFrameTrans and returns true, otherwise it returns false.
       //!
-      bool lookupTransformSafe(
+      bool lookup_transform_safe(
         const std::string & target_frame,
         const std::string & source_frame,
         const rclcpp::Time & time,
@@ -72,11 +72,11 @@ namespace rpp_localization
         const bool silent=false)
       {
         bool retVal = true;
-        tf2::TimePoint time_tf = tf2::timeFromSec(ros::toSeconds(time));
+        tf2::TimePoint time_tf = tf2::timeFromSec(ros::to_seconds(time));
 
 
           tf2::Duration duration_tf =
-            tf2::durationFromSec(ros::toSeconds(duration));
+            tf2::durationFromSec(ros::to_seconds(duration));
 
         // First try to transform the data at the requested time
         try
@@ -144,20 +144,20 @@ namespace rpp_localization
       //! frame_id to itself. If any of these checks succeed, the method sets the
       //! value of @p targetFrameTrans and returns true, otherwise it returns false.
       //!
-      bool lookupTransformSafe(
+      bool lookup_transform_safe(
         const std::string & target_frame,
         const std::string & source_frame,
         const rclcpp::Time & time,
         tf2::Transform & target_frame_trans,
         const bool silent=false)
       {
-        return lookupTransformSafe(
+        return lookup_transform_safe(
           target_frame, source_frame, time,
           rclcpp::Duration(0, 0u), target_frame_trans, silent);
       }
 
       geometry_msgs::msg::TransformStamped
-      lookupTransform(
+      lookup_transform(
         const std::string & target_frame,
         const std::string & source_frame,
         const tf2::TimePoint & time_tf)

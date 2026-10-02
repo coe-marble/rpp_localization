@@ -1,0 +1,33 @@
+{
+  "Library": "rpp_localization",
+  "Plugins": [
+    {
+      "Type": "file",
+      "Path": "plugins/models/constant_acceleration_model15.hpp",
+      "Name": "ConstantAccelerationModel15"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/ekf15_plugin.hpp",
+      "Name": "Ekf15",
+      "PluginType": "rpp_localization::LocalizationFilter15"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/ukf15_plugin.hpp",
+      "Name": "Ukf15",
+      "PluginType": "rpp_localization::LocalizationFilter15"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/models/vehicle_model3d_nav_model15.hpp",
+      "Name": "VehicleModel3DNavModel15"
+    }
+  ],
+  "PluginTypes": [
+    {
+      "Path": "plugin_types/localization.capnp",
+      "Type": "file"
+    }
+  ]
+}

@@ -5,7 +5,6 @@
 #include "rpp_localization/core/filter_utilities.hpp"
 
 #include <iomanip>
-#include <string>
 #include <vector>
 
 #include "angles/angles.h"
@@ -98,7 +97,7 @@ bool check_mahalanobis_threshold(
   return true;
 }
 
-void wrapStateAngles(Eigen::VectorXd& state)
+void wrap_state_angles(Eigen::VectorXd& state)
 {
   using namespace rpp_localization;
   state(StateMemberRoll) = angles::normalize_angle(state(StateMemberRoll));

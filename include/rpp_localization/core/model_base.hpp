@@ -1,7 +1,6 @@
 #pragma once
 
-#include "rpp_localization/core/measurement.hpp"
-#include "rpp_localization/core/prediction_model.hpp"
+#include "rpp_localization/core/filter_common.hpp"
 
 #include <ostream>
 #include <stdexcept>
@@ -10,24 +9,24 @@
 namespace rpp_localization
 {
 
-// Runtime base for navigation models. ROS lifecycle and time adaptation belong
+// Core contract for injected navigation prediction models. ROS lifecycle and time adaptation belong
 // to the model and adapter layers, not this core interface.
-class ModelBase : public PredictionModel
+class ModelBase
 {
 public:
   explicit ModelBase(const int state_dim)
-  : _use_control(false),
-    _compute_jacobian(true),
-    _compute_covariance(true),
+  : _state_dim(state_dim),
     _debug(false),
-    _debug_stream(nullptr)
+    _debug_stream(nullptr),
+    _use_control(false),
+    _compute_jacobian(true),
+    _compute_covariance(true)
   {
     if (state_dim <= 0)
     {
       throw std::invalid_argument("state_space_dim must be >0");
     }
 
-    _state_dim = state_dim;
     _state.resize(state_dim);
     _state.setZero();
     _state_covariance.resize(state_dim, state_dim);
@@ -38,11 +37,11 @@ public:
 
   virtual ~ModelBase() = default;
 
-  void predict(
+  virtual void predict(
     StateVector& state,
     CovarianceMatrix& state_covariance,
     TimestampNs reference_time,
-    DurationNs delta) override = 0;
+    DurationNs delta) = 0;
 
   void predict(const TimestampNs reference_time, const DurationNs delta)
   {

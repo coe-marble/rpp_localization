@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: (c) 2014, 2015, 2016 Charles River Analytics, Inc.
- * SPDX-License-Identifier: BSD-3-Clause
- */
 #ifndef RPP_LOCALIZATION__ROS_FILTER_BASE_HPP_
 #define RPP_LOCALIZATION__ROS_FILTER_BASE_HPP_
 
@@ -25,16 +21,15 @@
 #include "geometry_msgs/msg/twist_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/core/filter_state.hpp"
 #include "rpp_localization/srv/toggle_filter_processing.hpp"
 #include "rpp_localization/srv/set_pose.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_srvs/srv/empty.hpp"
-#include "tf2/LinearMath/Transform.h"
+#include "tf2/LinearMath/Transform.hpp"
 #include "rpp_localization/ros/tf_buffer_wrapper.hpp"
 
-#include "rpp_localization/core/measurement.hpp"
-#include "rpp_localization/filters/nav_filter.hpp"
+#include "rpp_localization/core/filter_common.hpp"
+#include "rpp_localization/ros/localization_script.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 #include "rpp_localization/ros/time.hpp"
 
@@ -48,7 +43,6 @@ using MeasurementQueue =
 using MeasurementHistoryDeque = std::deque<MeasurementPtr>;
 using FilterStateHistoryDeque = std::deque<FilterStatePtr>;
 
-template<typename T>
 class RosFilterBase : public rclcpp::Node
 {
 public:
@@ -58,7 +52,7 @@ public:
   //! @param[in] target_frame - The target frame_id into which to transform the
   //! data
   //!
-  void accelerationCallback(
+  void acceleration_callback(
     const sensor_msgs::msg::Imu::SharedPtr msg,
     const CallbackData & callback_data,
     const std::string & target_frame);
@@ -66,13 +60,13 @@ public:
   //! @brief Callback method for receiving non-stamped control input
   //! @param[in] msg - The ROS twist message to take in
   //!
-  void controlCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
+  void control_callback(const geometry_msgs::msg::Twist::SharedPtr msg);
 
   //! @brief Callback method for receiving stamped control input
   //! @param[in] msg - The ROS stamped twist message to take in
   //!
   void
-  controlStampedCallback(const geometry_msgs::msg::TwistStamped::SharedPtr msg);
+  control_stamped_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg);
 
   //! @brief Differentiate angular velocity for angular acceleration
   //!
@@ -82,7 +76,7 @@ public:
   //! but now we only focus on obtaining the angular acceleration. It implements a backward-
   //! Euler differentiation.
   //!
-  void differentiateMeasurements(const rclcpp::Time & current_time);
+  void differentiate_measurements(const rclcpp::Time & current_time);
 
   //! @brief Adds a measurement to the queue of measurements to be processed
   //!
@@ -96,7 +90,7 @@ public:
   //! distance, for outlier rejection
   //! @param[in] time - The time of arrival (in seconds)
   //!
-  void enqueueMeasurement(
+  void enqueue_measurement(
     const std::string & topic_name,
     const Eigen::VectorXd & measurement,
     const Eigen::MatrixXd & measurement_covariance,
@@ -114,30 +108,22 @@ public:
   //! this. It sets the 3D variables to 0, gives those variables tiny variances,
   //! and sets their updateVector values to 1.
   //!
-  void forceTwoD(
+  void force_two_d(
     Eigen::VectorXd & measurement,
     Eigen::MatrixXd & measurement_covariance,
     std::vector<bool> & update_vector);
-
-  //! @brief Method to get filter
-  //! @param[out] filter - the underlying templated filter
-  //!
-  NavFilter<T> & getFilter()
-  {
-    return filter_;
-  }
 
   //! @brief Retrieves the EKF's output for broadcasting
   //! @param[out] message - The standard ROS odometry message to be filled
   //! @return true if the filter is initialized, false otherwise
   //!
-  bool getFilteredOdometryMessage(nav_msgs::msg::Odometry * message);
+  bool get_filtered_odometry_message(nav_msgs::msg::Odometry * message);
 
   //! @brief Retrieves the EKF's acceleration output for broadcasting
   //! @param[out] message - The standard ROS acceleration message to be filled
   //! @return true if the filter is initialized, false otherwise
   //!
-  bool getFilteredAccelMessage(
+  bool get_filtered_accel_message(
     geometry_msgs::msg::AccelWithCovarianceStamped * message);
 
   //! @brief Callback method for receiving all IMU messages
@@ -154,7 +140,7 @@ public:
   //! This method separates out the orientation, angular velocity, and linear
   //! acceleration data and passed each on to its respective callback.
   //!
-  void imuCallback(
+  void imu_callback(
     const sensor_msgs::msg::Imu::SharedPtr msg,
     const std::string & topic_name,
     const CallbackData & pose_callback_data,
@@ -167,7 +153,7 @@ public:
   //! @param[in] current_time - The time at which to carry out integration (the
   //! current time)
   //!
-  void integrateMeasurements(const rclcpp::Time & current_time);
+  void integrate_measurements(const rclcpp::Time & current_time);
 
 
   //! @brief Callback method for receiving all odometry messages
@@ -182,7 +168,7 @@ public:
   //! This method simply separates out the pose and twist data into two new
   //! messages, and passes them into their respective callbacks
   //!
-  void odometryCallback(
+  void odometry_callback(
     const nav_msgs::msg::Odometry::SharedPtr msg,
     const std::string & topic_name,
     const CallbackData & pose_callback_data,
@@ -197,7 +183,7 @@ public:
   //! the data
   //! @param[in] imu_data - Whether this data comes from an IMU
   //!
-  void poseCallback(
+  void pose_callback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg,
     const CallbackData & callback_data, const std::string & target_frame,
     const std::string & pose_source_frame,
@@ -209,7 +195,7 @@ public:
   //! @param[in] target_frame - The target frame_id into which to transform the
   //! data
   //!
-  void twistCallback(
+  void twist_callback(
     const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg,
     const CallbackData & callback_data, const std::string & target_frame);
 
@@ -217,22 +203,23 @@ public:
   //! @param[out] message - The standard ROS odometry message to be validated
   //! @return true if the filter output is valid, false otherwise
   //!
-  bool validateFilterOutput(nav_msgs::msg::Odometry * message);
+  bool validate_filter_output(nav_msgs::msg::Odometry * message);
 
   //! @brief Aggregates all diagnostics so they can be published
   //! @param[in] wrapper - The diagnostic status wrapper to update
   //!
-  void aggregateDiagnostics(
+  void aggregate_diagnostics(
     diagnostic_updater::DiagnosticStatusWrapper & wrapper);
 
 protected:
 
   //! @brief Constructor
   //!
-  //! The RosFilter constructor makes sure that anyone using
-  //! this template is doing so with the correct object type
+  //! The ROS base owns the RPP localization component context and filter.
   //!
-  explicit RosFilterBase(const rclcpp::NodeOptions & options, bool online);
+  explicit RosFilterBase(
+    const rclcpp::NodeOptions & options, bool online,
+    std::string default_configuration);
 
   //! @brief Destructor
   //!
@@ -249,6 +236,30 @@ protected:
   //!
   void reset();
 
+  void initialize_rpp_filter();
+  void reset_rpp_filter();
+  void correct_rpp_filter(const Measurement & measurement);
+  void predict_rpp_filter(TimestampNs reference_time, DurationNs delta);
+  void process_rpp_measurement(const Measurement & measurement);
+
+  [[nodiscard]] bool rpp_filter_debug() const noexcept;
+  [[nodiscard]] bool rpp_filter_initialized() const noexcept;
+  [[nodiscard]] bool rpp_filter_uses_control() const noexcept;
+  [[nodiscard]] const StateVector & rpp_filter_state() const noexcept;
+  [[nodiscard]] const CovarianceMatrix & rpp_filter_covariance() const noexcept;
+  [[nodiscard]] const ControlCommand & rpp_filter_control() const noexcept;
+  [[nodiscard]] const std::vector<bool> & rpp_filter_control_update_vector() const noexcept;
+  [[nodiscard]] TimestampNs rpp_filter_last_measurement_time() const noexcept;
+  [[nodiscard]] const rclcpp::Duration & rpp_filter_sensor_timeout() const noexcept;
+
+  void set_rpp_filter_control(const ControlCommand & control);
+  void set_rpp_filter_debug(bool debug, std::ostream * output);
+  void set_rpp_filter_last_measurement_time(TimestampNs time) noexcept;
+  void set_rpp_filter_sensor_timeout(const rclcpp::Duration & timeout);
+  void set_rpp_filter_state(const Eigen::VectorXd & state);
+  void set_rpp_filter_covariance(const Eigen::MatrixXd & covariance);
+  void validate_rpp_filter_delta(rclcpp::Duration & delta) const;
+
 
   //! @brief Finds the latest filter state before the given timestamp and makes
   //! it the current state again.
@@ -259,7 +270,7 @@ protected:
   //! @param[in] time - The time to which the filter state should revert
   //! @return True if restoring the filter succeeded. False if not.
   //!
-  bool revertTo(TimestampNs time);
+  bool revert_to(TimestampNs time);
 
 
   //! @brief Saves the current filter state in the queue of previous filter
@@ -269,12 +280,12 @@ protected:
   //! older measurements come in.
   //! @param[in] filter - The filter base object whose state we want to save
   //!
-  void saveFilterState(NavFilter<T> & filter);
+  void save_filter_state();
 
 
   //! @brief Clears measurement queue
   //!
-  void clearMeasurementQueue();
+  void clear_measurement_queue();
 
   //! @brief Adds a diagnostic message to the accumulating map and updates the
   //! error level
@@ -285,7 +296,7 @@ protected:
   //! @param[in] is_static - Whether or not this diagnostic information is
   //! static
   //!
-  void addDiagnostic(
+  void add_diagnostic(
     const int error_level, const std::string & topic_and_class,
     const std::string & message, const bool is_static);
 
@@ -305,7 +316,7 @@ protected:
   //! @param[in] dimension - The number of values to copy, starting at the
   //! offset
   //!
-  void copyCovariance(
+  void copy_covariance(
     const double * covariance_in,
     Eigen::MatrixXd & covariance_out,
     const std::string & topic_name,
@@ -319,7 +330,7 @@ protected:
   //! @param[in] covariance_out - The destination array
   //! @param[in] dimension - The number of values to copy
   //!
-  void copyCovariance(
+  void copy_covariance(
     const Eigen::MatrixXd & covariance_in,
     double * covariance_out, const size_t dimension);
 
@@ -337,7 +348,7 @@ protected:
   //! @param[in] measurement_covariance - The covariance of the converted
   //! measurement
   //!
-  bool prepareAcceleration(
+  bool prepare_acceleration(
     const sensor_msgs::msg::Imu::SharedPtr msg,
     const std::string & topic_name,
     const std::string & target_frame,
@@ -364,7 +375,7 @@ protected:
   //! @return true indicates that the measurement was successfully prepared,
   //! false otherwise
   //!
-  bool preparePose(
+  bool prepare_pose(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg,
     const std::string & topic_name, const std::string & target_frame,
     const std::string & source_frame,
@@ -384,7 +395,7 @@ protected:
   //! @return true indicates that the measurement was successfully prepared,
   //! false otherwise
   //!
-  bool prepareTwist(
+  bool prepare_twist(
     const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg,
     const std::string & topicName, const std::string & targetFrame,
     std::vector<bool> & updateVector, Eigen::VectorXd & measurement,
@@ -395,7 +406,7 @@ protected:
   //! @param[in] cutoff_time - Measurements and states older than this time will
   //! be dropped.
   //!
-  void clearExpiredHistory(TimestampNs cutoff_time);
+  void clear_expired_history(TimestampNs cutoff_time);
 
 
   void load_filter_params();
@@ -499,7 +510,7 @@ protected:
   //!
   geometry_msgs::msg::TransformStamped world_base_link_trans_msg_;
 
-  //! @brief last call of periodicUpdate
+  //! @brief last call of periodic_update
   //!
   rclcpp::Time last_diag_time_;
 
@@ -646,9 +657,20 @@ protected:
   //!
   std::unique_ptr<diagnostic_updater::Updater> diagnostic_updater_;
 
-  //! @brief Our filter (EKF, UKF, etc.)
-  //!
-  NavFilter<T> filter_;
+  std::string default_configuration_;
+  std::unique_ptr<rpp::ComponentContext> rpp_context_;
+  std::unique_ptr<LocalizationScript> rpp_script_;
+  std::shared_ptr<LocalizationFilter15> rpp_filter_;
+  StateVector rpp_state_;
+  CovarianceMatrix rpp_covariance_;
+  ControlCommand rpp_control_;
+  std::vector<bool> rpp_control_update_vector_;
+  rclcpp::Duration rpp_sensor_timeout_;
+  TimestampNs rpp_last_measurement_time_{0};
+  bool rpp_filter_initialized_{false};
+  bool rpp_remote_reset_required_{false};
+  bool rpp_use_control_{false};
+  bool rpp_debug_{false};
 
   //! @brief optional signaling diagnostic frequency
   //!

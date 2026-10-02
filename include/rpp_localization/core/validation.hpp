@@ -24,7 +24,7 @@ struct NormalizedCovariance
   CovarianceStatus status;
 };
 
-[[nodiscard]] inline NormalizedCovariance normalizeMeasurementCovariance(
+[[nodiscard]] inline NormalizedCovariance normalize_measurement_covariance(
   double covariance)
 {
   const bool was_negative = covariance < 0.0;
@@ -46,13 +46,13 @@ struct NormalizedCovariance
   return {covariance, status};
 }
 
-[[nodiscard]] constexpr bool hasNegativeCovariance(const CovarianceStatus status)
+[[nodiscard]] constexpr bool has_negative_covariance(const CovarianceStatus status)
 {
   return status == CovarianceStatus::kNegative ||
          status == CovarianceStatus::kNegativeAndNearZero;
 }
 
-[[nodiscard]] constexpr bool hasNearZeroCovariance(const CovarianceStatus status)
+[[nodiscard]] constexpr bool has_near_zero_covariance(const CovarianceStatus status)
 {
   return status == CovarianceStatus::kNearZero ||
          status == CovarianceStatus::kNegativeAndNearZero;
@@ -65,7 +65,7 @@ enum class MeasurementTimeStatus : std::uint8_t
   kForward,
 };
 
-[[nodiscard]] inline MeasurementTimeStatus classifyMeasurementDelta(
+[[nodiscard]] inline MeasurementTimeStatus classify_measurement_delta(
   const DurationNs delta)
 {
   if (delta > 0)

@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: (c) 2014, 2015, 2016 Charles River Analytics, Inc.
- * SPDX-License-Identifier: BSD-3-Clause
- */
 #ifndef RPP_LOCALIZATION__ROS_FILTER_UTILITIES_HPP_
 #define RPP_LOCALIZATION__ROS_FILTER_UTILITIES_HPP_
 
@@ -10,20 +6,21 @@
 #include <vector>
 #include <sstream>
 #include <fstream>
+#include <functional>
 
 #include "Eigen/Dense"
 #include "rclcpp/time.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2/LinearMath/Transform.h"
-#include "tf2/LinearMath/Vector3.h"
-#include "tf2/buffer_core.h"
+#include "tf2/LinearMath/Quaternion.hpp"
+#include "tf2/LinearMath/Transform.hpp"
+#include "tf2/LinearMath/Vector3.hpp"
+#include "tf2/buffer_core.hpp"
 
 #include "rpp_localization/core/filter_common.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 
 #define RF_DEBUG(msg) \
-  if (this->filter_.get_debug()) { \
+  if (this->rpp_filter_debug()) { \
     this->_debug_stream << msg; \
   }
 
@@ -65,7 +62,7 @@ struct CallbackData
 namespace ros_filter_utilities
 {
 
-double getYaw(const tf2::Quaternion quat);
+double get_yaw(const tf2::Quaternion quat);
 
 //! @brief Utility method for converting quaternion to RPY
 //! @param[in] quat - The quaternion to convert
@@ -73,7 +70,7 @@ double getYaw(const tf2::Quaternion quat);
 //! @param[out] pitch - The converted pitch
 //! @param[out] yaw - The converted yaw
 //!
-void quatToRPY(
+void quat_to_rpy(
   const tf2::Quaternion & quat, double & roll, double & pitch,
   double & yaw);
 
@@ -81,13 +78,13 @@ void quatToRPY(
 //! @param[in] state - The state to convert
 //! @param[out] stateTF - The converted state
 //!
-void stateToTF(const Eigen::VectorXd & state, tf2::Transform & stateTF);
+void state_to_tf(const Eigen::VectorXd & state, tf2::Transform & stateTF);
 
 //! @brief Converts a TF transform/pose into our Eigen state vector
 //! @param[in] stateTF - The state to convert
 //! @param[out] state - The converted state
 //!
-void TFtoState(const tf2::Transform & stateTF, Eigen::VectorXd & state);
+void tf_to_state(const tf2::Transform & stateTF, Eigen::VectorXd & state);
 
 void load_covariance_parameter(rclcpp::Node& node, const std::string & parameter, Eigen::MatrixXd & covariance);
 
@@ -97,7 +94,7 @@ void load_covariance_parameter(rclcpp::Node& node, const std::string & parameter
   //! @return The boolean vector of update settings for each variable for this
   //! topic
   //!
-std::vector<bool> loadUpdateConfig(rclcpp::Node& node, const std::string & topic_name);
+std::vector<bool> load_update_config(rclcpp::Node& node, const std::string & topic_name);
 
 void handle_odom_params(rclcpp::Node& node, std::ofstream* debug_stream,
   std::vector<CallbackData>& pose_callback_data_v,

@@ -1,184 +1,52 @@
-# RPP localization migration TODO
+# RPP localization TODO
 
-## Current baseline
+## Supported EKF/UKF path
 
-This package is a renamed copy of labust_localization at
-`90750786492c802b4e6c6d36034f3432d08031af` (`Finish inekf and add biograd
-params`). Its existing behavior is the reference for every migration step.
+- [x] Keep the 15-state EKF and UKF numerical implementations in a ROS-free
+      core library.
+- [x] Define `NavModel15` for interchangeable 15-state process-model plugins.
+- [x] Define `LocalizationFilter15` for interchangeable EKF/UKF filter plugins.
+- [x] Provide `ConstantAccelerationModel15`, `Ekf15`, and `Ukf15` RPP entry
+      points.
+- [x] Provide `VehicleModel3DNavModel15` as an explicit VehicleModel3D bridge.
+- [x] Keep model, adapter, and filter ownership at the RPP plugin composition
+      root; generic filters do not own models.
+- [x] Configure constant-acceleration and UKF process covariance through RPP
+      parameters.
+- [x] Preserve control timeout/configuration and measurement-covariance
+      normalization at the RPP boundary.
+- [x] Replay stale measurements from the retained initialization state through
+      recorded prediction/correction history.
 
-Already present:
+## ROS/RPP merge
 
-- EKF, UKF, and InEKF implementations;
-- the generic NavModelBase abstraction, ConstantAccelerationModel, and InEKF
-  InertialProcess;
-- InEKF pose, twist, and attitude measurement models;
-- NavFilter, RosFilter, RosBagFilter, ROS nodes, services, launch files,
-  parameter files, and rosbag fixtures;
-- unit, interface, launch, and bag-replay tests;
-- package, generated-service, source, test, launch, and public-header
-  namespaces renamed from robot_localization to rpp_localization.
+- [x] Make `RosFilterBase` the direct owner of the RPP component context and
+      `LocalizationFilter15`; remove the phantom `NavFilter<T>` wrapper.
+- [x] Make `RosFilterBase` and `RosFilter` concrete, non-template classes;
+      remove `RosFilterTypes` and type-tag aliases.
+- [x] Preserve labust queue ordering, TF transforms, two-D handling, controls,
+      services, timer prediction, diagnostics, and lagged-data reversion.
+- [x] Make the RPP script the ROS composition root: its `filter` slot
+      selects `Ekf15` or `Ukf15`, and each filter owns its `NavModel15` model.
+- [x] Keep `ekf_node` and `ukf_node` as configuration-default compatibility
+      aliases around the generic `localization_node`.
+- [x] Keep ROS topic/frame and adapter settings in YAML; RPP compositions
+      supply model-specific process and filter tuning.
+- [ ] Restore/adapt ROS coverage after the structural merge; do not change
+      InEKF in this work.
+- [x] Exclude InEKF from the EKF/UKF-only build without deleting its source.
 
-Validation completed for the committed baseline `db32675`:
+## Deferred InEKF work
 
-- `colcon build --packages-select rpp_localization --executor sequential`
-  completed successfully;
-- the original `labust_localization` package also builds from the recorded
-  source revision;
-- focused bag replay passes for EKF and UKF bags 2 and 3;
-- EKF bag 1 has a final-position parity failure; UKF bag 1 produces NaN; and
-  the InEKF bag 1 fixture remains external and unavailable;
-- the original package replay tests also fail structurally: its bag 1 fixture
-  is external, its bags 2 and 3 omit the required parameters, and its UKF
-  replay crashes.
+- [ ] Design a dedicated RPP process and measurement contract for the
+      Lie-group InEKF state, tangent covariance, and IMU input.
+- [ ] Port InEKF only after that contract exists; do not force it into
+      `NavModel15` or the 15-state EKF/UKF lifecycle.
 
-These are baseline observations, not accepted behavior changes. Keep the
-legacy source and the committed rpp_localization baseline available for every
-subsequent parity check.
+## Verification
 
-## Dependency-extraction status
-
-The direct source and build dependency on labust_common is removed. Its
-behavior-critical types are now owned by rpp_localization:
-
-- filters derive from rpp_localization::FilterBase;
-- models derive from rpp_localization::ModelBase;
-- filters and ROS wrappers use rpp_localization::Measurement and
-  ControlCommand.
-
-These compatibility types intentionally retain rclcpp time and lifecycle
-interfaces for now. Keep the legacy source as the behavior reference until
-the renamed baseline and focused parity tests have run.
-
-## Target RPP composition
-
-Keep the legacy ownership boundary:
-
-- a filter owns state, timestamps, prediction scheduling, and correction;
-- a model owns its legacy state/covariance prediction behavior;
-- an RPP filter plugin receives an RPP model plugin through
-  RPP_COMPONENTS and ComponentContext.
-
-The first RPP pair is:
-
-- LocalizationNavModel15: the 15-state EKF/UKF model contract;
-- LocalizationFilter15: the EKF/UKF filter contract.
-
-The model step must carry the complete legacy input/output needed to preserve
-state and covariance propagation, process noise, control use, time validation,
-and status. Finalize its Cap'n Proto schema before implementing wrappers.
-
-InEKF is not assumed to fit LocalizationNavModel15. Its existing
-InertialProcess and Lie-group measurement models require a separate contract
-decision after the EKF/UKF model path is proven.
-
-VehicleModel3D is not a substitute for LocalizationNavModel15 without an
-explicit 15-state mapping plus covariance and uncertainty-propagation
-semantics.
-
-## Work items
-
-### 0. Lock down the renamed baseline
-
-- [x] Copy the full legacy package.
-- [x] Rename the package, public include path, code namespace, generated
-      service namespace, launch/test package references, and install-visible
-      library target to rpp_localization.
-- [x] Record the source labust_localization commit used for the copy.
-- [x] Configure and build the renamed package.
-- [x] Run the existing tests unchanged.
-- [x] Separate pre-existing legacy failures from rename regressions.
-
-### 1. Extract the required legacy core types
-
-- [x] Inventory every direct use of FilterBase, ModelBase, Measurement,
-      ControlCommand, and their helper types.
-- [x] Localize behavior-compatible Measurement, ControlCommand, ModelBase,
-      and FilterBase under include/rpp_localization/ and remove the direct
-      source, CMake, and package dependency.
-- [x] Keep the legacy definitions as comparison references until parity tests
-      pass.
-- [x] Move the localized compatibility surface into
-      include/rpp_localization/core/; keep its shared implementation utility
-      in src/core/.
-- [x] Move common state, covariance, measurement, control, time, and status
-      validation into the new core without changing defaults.
-- [x] Remove rclcpp from the new core API; keep ROS conversions in adapters.
-  - [x] Introduce ROS-free state, covariance, measurement, control, and
-        nanosecond types; use nanoseconds in core validation.
-  - [x] Move measurement and filter-history timestamps to the core clock, with
-        conversions at ROS adapters and the temporary legacy filter shim.
-  - [x] Define ROS-free runtime prediction/filter contracts and bridge the
-        legacy time-based bases to them.
-  - [x] Replace the ROS lifecycle and time methods on the legacy compatibility
-        model/filter bases with the runtime core interfaces.
-  - [x] Move the remaining ROS time conversion helpers out of
-        core/filter_utilities.hpp.
-- [ ] Add and run focused parity tests against the legacy reference when test
-      execution is authorized.
-  - [x] Add deterministic coverage for covariance normalization, stale-time
-        classification, NavFilter queue behavior, core runtime dispatch, and ROS
-        time conversion.
-  - [ ] Run the focused coverage against the current and legacy baselines.
-
-### 1a. Establish package boundaries
-
-- [x] Group implementation-independent compatibility types in core/.
-- [x] Group generic filters, models, InEKF-specific code, and ROS adapters
-      under filters/, models/, inekf/, and ros/.
-- [x] Move ROS node entry points under src/ros/nodes/ and update CMake and
-      internal include paths.
-
-### 2. Preserve the existing generic filter/model boundary
-
-- [ ] Adapt NavModelBase into a runtime rpp_localization core model interface;
-      do not rewrite the EKF or UKF equations.
-- [ ] Adapt Ekf and Ukf to consume that runtime interface rather than their
-      current template-owned model.
-- [ ] Port ConstantAccelerationModel unchanged behind the new interface.
-- [ ] Verify state prediction, covariance prediction, controls, stale timing,
-      near-zero/negative covariance handling, and pitch-singularity behavior
-      against the baseline.
-- [ ] Decide the separate InEKF model interface from existing
-      InertialProcess behavior; do not force it into the 15-state contract.
-
-### 3. Define RPP plugin contracts
-
-- [ ] Add plugin_types/localization.capnp and plugins.json.
-- [ ] Define canonical state-15, covariance-15x15 row-major, control-6,
-      measurement, estimate, and status payloads.
-- [ ] Define LocalizationNavModel15 step input/output and
-      LocalizationFilter15 lifecycle operations.
-- [ ] Document units, clock domain, optional-control encoding, covariance
-      layout, validation, error status, and Cap'n Proto ordinal rules.
-- [ ] Generate the C++ interfaces and review the generated method signatures.
-
-### 4. Add RPP model and filter wrappers
-
-- [ ] Implement plugins/models/constant_acceleration_model.hpp as
-      LocalizationNavModel15 with RPP_PARAMETERS.
-- [ ] Implement plugins/filters/ekf.hpp as LocalizationFilter15.
-- [ ] Inject the model with:
-
-      RPP_COMPONENTS(
-        {"model", "rpp_localization::LocalizationNavModel15"}
-      )
-
-- [ ] Retrieve that component during initialization and bind it to the generic
-      core EKF.
-- [ ] Register both headers in plugins.json.
-- [ ] Add plugin-boundary validation and parity tests.
-- [ ] Add a UKF filter wrapper only after the shared model contract is proven.
-
-### 5. Refactor ROS only after core/plugin parity
-
-- [ ] Split ROS-specific code into an adapter target/package.
-- [ ] Preserve existing nodes, topics, services, TF, parameters, diagnostics,
-      launch files, queues, and replay behavior.
-- [ ] Have the adapter construct the selected LocalizationFilter15 plugin.
-- [ ] Migrate InEKF only after its process/measurement plugin contract is
-      explicitly designed and tested.
-
-## Working rule
-
-Complete one unchecked item at a time. Do not start a later item, change
-legacy behavior, or run builds/tests without explicit authorization.
+- [ ] Build and run core parity plus ROS adapter tests when authorized.
+- [ ] Build and run the RPP boundary tests when the generated RPP interfaces
+      and Capn Proto runtime use a matching ABI.
+- [ ] Enable the VehicleModel3D bridge for a concrete model only after its
+      numeric `step()` behavior is verified.

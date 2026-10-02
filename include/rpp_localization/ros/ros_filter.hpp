@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: (c) 2014, 2015, 2016 Charles River Analytics, Inc.
- * SPDX-License-Identifier: BSD-3-Clause
- */
 #ifndef RPP_LOCALIZATION__ROS_FILTER_HPP_
 #define RPP_LOCALIZATION__ROS_FILTER_HPP_
 
@@ -25,18 +21,16 @@
 #include "geometry_msgs/msg/twist_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/core/filter_state.hpp"
 #include "rpp_localization/srv/toggle_filter_processing.hpp"
 #include "rpp_localization/srv/set_pose.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_srvs/srv/empty.hpp"
-#include "tf2/LinearMath/Transform.h"
-#include "tf2_ros/buffer.h"
-#include "tf2_ros/transform_broadcaster.h"
-#include "tf2_ros/transform_listener.h"
+#include "tf2/LinearMath/Transform.hpp"
+#include "tf2_ros/buffer.hpp"
+#include "tf2_ros/transform_broadcaster.hpp"
+#include "tf2_ros/transform_listener.hpp"
 
-#include "rpp_localization/core/measurement.hpp"
-#include "rpp_localization/filters/nav_filter.hpp"
+#include "rpp_localization/core/filter_common.hpp"
 
 #include "rpp_localization/ros/ros_filter_base.hpp"
 
@@ -50,16 +44,16 @@ using MeasurementQueue =
 using MeasurementHistoryDeque = std::deque<MeasurementPtr>;
 using FilterStateHistoryDeque = std::deque<FilterStatePtr>;
 
-template<typename T>
-class RosFilter : public RosFilterBase<T>
+class RosFilter : public RosFilterBase
 {
 public:
   //! @brief Constructor
   //!
-  //! The RosFilter constructor makes sure that anyone using
-  //! this template is doing so with the correct object type
+  //! The concrete ROS node publishes and subscribes around the RPP filter.
   //!
-  explicit RosFilter(const rclcpp::NodeOptions & options);
+  explicit RosFilter(
+    const rclcpp::NodeOptions & options,
+    std::string default_configuration = "");
 
   //! @brief Destructor
   //!
@@ -82,7 +76,7 @@ public:
   //! @param[out] response - status if upon success
   //! @return boolean true if successful, false if not
   //!
-  void toggleFilterProcessingCallback(
+  void toggle_filter_processing_callback(
     const std::shared_ptr<rmw_request_id_t>/*request_header*/,
     const std::shared_ptr<
       rpp_localization::srv::ToggleFilterProcessing::Request> req,
@@ -91,16 +85,16 @@ public:
 
   //! @brief Loads all parameters from file
   //!
-  void loadParams();
+  void load_params();
 
   //! @brief callback function which is called for periodic updates
   //!
-  void periodicUpdate();
+  void periodic_update();
 
 
   //! @brief Service callback for resetting the filter to its initial state. Parameters are unused.
   //!
-  void resetSrvCallback(
+  void reset_srv_callback(
     const std::shared_ptr<rmw_request_id_t>,
     const std::shared_ptr<std_srvs::srv::Empty::Request>,
     const std::shared_ptr<std_srvs::srv::Empty::Response>);
@@ -109,7 +103,7 @@ public:
   //! estimate
   //! @param[in] msg - The ROS stamped pose with covariance message to take in
   //!
-  void setPoseCallback(
+  void set_pose_callback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
 
   //! @brief Service callback for manually setting/resetting the internal pose
@@ -117,7 +111,7 @@ public:
   //!
   //! @param[in] request - Custom service request with pose information
   //! @return true if successful, false if not
-  bool setPoseSrvCallback(
+  bool set_pose_srv_callback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<rpp_localization::srv::SetPose::Request> request,
     std::shared_ptr<rpp_localization::srv::SetPose::Response> response);
@@ -126,7 +120,7 @@ public:
   //! @param[in] request - N/A
   //! @param[out] response - N/A
   //! @return boolean true if successful, false if not
-  bool enableFilterSrvCallback(
+  bool enable_filter_srv_callback(
     const std::shared_ptr<rmw_request_id_t>,
     const std::shared_ptr<std_srvs::srv::Empty::Request>,
     const std::shared_ptr<std_srvs::srv::Empty::Response>);

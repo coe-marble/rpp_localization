@@ -1,7 +1,3 @@
-# SPDX-FileCopyrightText: 2018 Open Source Robotics Foundation, Inc.
-# SPDX-FileCopyrightText: 2019 Samsung Research America
-# SPDX-License-Identifier: Apache-2.0
-
 from launch import LaunchDescription
 from ament_index_python.packages import get_package_share_directory
 import launch_ros.actions

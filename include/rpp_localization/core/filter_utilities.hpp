@@ -33,7 +33,7 @@ namespace filter_utilities
  * @param[in] tf_prefix - the tf2 prefix to append
  * @param[in, out] frame_id - the resulting frame_id value
  */
-inline void appendPrefix(const std::string & tf_prefix, std::string & frame_id)
+inline void append_prefix(const std::string & tf_prefix, std::string & frame_id)
 {
   size_t frame_id_prefix_index = 0u;
   size_t tf_prefix_index = 0u;
@@ -61,7 +61,7 @@ bool check_mahalanobis_threshold(
 /**
 * @brief Keeps the state Euler angles in the range [-pi, pi]
 */
-void wrapStateAngles(Eigen::VectorXd& state);
+void wrap_state_angles(Eigen::VectorXd& state);
 
 }  // namespace filter_utilities
 }  // namespace rpp_localization

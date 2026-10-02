@@ -5,6 +5,8 @@
 #include "rpp_localization/core/filter_base.hpp"
 #include "rpp_localization/core/model_base.hpp"
 #include "rpp_localization/core/validation.hpp"
+#include "rpp_localization/filters/extended_kalman_filter.hpp"
+#include "rpp_localization/models/constant_acceleration_model.hpp"
 
 namespace rpp_localization
 {
@@ -14,8 +16,8 @@ namespace
 class RecordingModel final : public ModelBase
 {
 public:
-  RecordingModel()
-  : ModelBase(2)
+  explicit RecordingModel(const int state_dimension = 2)
+  : ModelBase(state_dimension)
   {
   }
 
@@ -27,7 +29,7 @@ public:
   {
     last_reference_time = reference_time;
     last_delta = delta;
-    state.array() += nanosecondsToSeconds(delta);
+    state.array() += nanoseconds_to_seconds(delta);
     covariance.diagonal().array() += 1.0;
   }
 
@@ -61,14 +63,14 @@ public:
 
 }  // namespace
 
-TEST(CoreCompatibilityTest, NormalizesCovarianceLikeTheLegacyFilters)
+TEST(CoreCompatibilityTest, normalizes_covariance_like_the_legacy_filters)
 {
-  const auto negative = validation::normalizeMeasurementCovariance(-4.0);
+  const auto negative = validation::normalize_measurement_covariance(-4.0);
   EXPECT_DOUBLE_EQ(negative.value, 4.0);
   EXPECT_EQ(negative.status, validation::CovarianceStatus::kNegative);
 
   const auto negative_near_zero =
-    validation::normalizeMeasurementCovariance(-0.5e-9);
+    validation::normalize_measurement_covariance(-0.5e-9);
   EXPECT_DOUBLE_EQ(
     negative_near_zero.value,
     validation::kMinimumMeasurementCovariance);
@@ -76,35 +78,35 @@ TEST(CoreCompatibilityTest, NormalizesCovarianceLikeTheLegacyFilters)
     negative_near_zero.status,
     validation::CovarianceStatus::kNegativeAndNearZero);
 
-  const auto near_zero = validation::normalizeMeasurementCovariance(0.0);
+  const auto near_zero = validation::normalize_measurement_covariance(0.0);
   EXPECT_DOUBLE_EQ(near_zero.value, validation::kMinimumMeasurementCovariance);
   EXPECT_EQ(near_zero.status, validation::CovarianceStatus::kNearZero);
 
-  const auto minimum = validation::normalizeMeasurementCovariance(
+  const auto minimum = validation::normalize_measurement_covariance(
     validation::kMinimumMeasurementCovariance);
   EXPECT_DOUBLE_EQ(minimum.value, validation::kMinimumMeasurementCovariance);
   EXPECT_EQ(minimum.status, validation::CovarianceStatus::kValid);
 
-  const auto nan = validation::normalizeMeasurementCovariance(
+  const auto nan = validation::normalize_measurement_covariance(
     std::numeric_limits<double>::quiet_NaN());
   EXPECT_TRUE(std::isnan(nan.value));
   EXPECT_EQ(nan.status, validation::CovarianceStatus::kValid);
 }
 
-TEST(CoreCompatibilityTest, ClassifiesMeasurementTimesLikeTheLegacyFilter)
+TEST(CoreCompatibilityTest, classifies_measurement_times_like_the_legacy_filter)
 {
   EXPECT_EQ(
-    validation::classifyMeasurementDelta(-1),
+    validation::classify_measurement_delta(-1),
     validation::MeasurementTimeStatus::kStale);
   EXPECT_EQ(
-    validation::classifyMeasurementDelta(0),
+    validation::classify_measurement_delta(0),
     validation::MeasurementTimeStatus::kCurrent);
   EXPECT_EQ(
-    validation::classifyMeasurementDelta(1),
+    validation::classify_measurement_delta(1),
     validation::MeasurementTimeStatus::kForward);
 }
 
-TEST(CoreCompatibilityTest, DispatchesModelPredictionThroughTheCoreClock)
+TEST(CoreCompatibilityTest, dispatches_model_prediction_through_the_core_clock)
 {
   RecordingModel model;
   ModelBase& model_base = model;
@@ -127,19 +129,32 @@ TEST(CoreCompatibilityTest, DispatchesModelPredictionThroughTheCoreClock)
   EXPECT_DOUBLE_EQ(state(1), 0.5);
 }
 
-TEST(CoreCompatibilityTest, DispatchesFilterRuntimeOperations)
+TEST(CoreCompatibilityTest, dispatches_filter_operations)
 {
   RecordingFilter filter;
-  RuntimeFilter& runtime_filter = filter;
+  FilterBase& filter_base = filter;
   Measurement measurement;
   measurement.time_ = 123;
 
-  runtime_filter.correct(measurement);
-  runtime_filter.predict(456, 789);
+  filter_base.correct(measurement);
+  filter_base.predict(456, 789);
 
   EXPECT_EQ(filter.corrected_measurement_time, 123);
   EXPECT_EQ(filter.predicted_reference_time, 456);
   EXPECT_EQ(filter.predicted_delta, 789);
+}
+
+TEST(CoreCompatibilityTest, ekf_uses_an_injected_runtime_model)
+{
+  RecordingModel model(STATE_SIZE);
+  Ekf filter(model);
+
+  filter.predict(1'000, 250'000'000);
+
+  EXPECT_EQ(model.last_reference_time, 1'000);
+  EXPECT_EQ(model.last_delta, 250'000'000);
+  EXPECT_DOUBLE_EQ(model.get_state()(0), 0.25);
+  EXPECT_DOUBLE_EQ(model.get_state()(1), 0.25);
 }
 
 }  // namespace rpp_localization

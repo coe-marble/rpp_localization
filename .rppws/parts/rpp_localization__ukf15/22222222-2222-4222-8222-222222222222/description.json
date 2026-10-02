@@ -1,0 +1,21 @@
+{
+  "Id": "22222222-2222-4222-8222-222222222222",
+  "Name": "DefaultUkf15",
+  "PluginType": "rpp_localization::LocalizationFilter15",
+  "PluginName": "rpp_localization::Ukf15",
+  "Library": "rpp_localization",
+  "SubcomponentSpec": {
+    "model": "rpp_localization::NavModel15"
+  },
+  "Subcomponents": {
+    "model": {
+      "Id": "22222222-2222-4222-8222-222222222223",
+      "PluginType": "rpp_localization::NavModel15",
+      "PluginName": "rpp_localization::ConstantAccelerationModel15",
+      "SlotName": "model",
+      "Library": "rpp_localization",
+      "IsLinked": false
+    }
+  },
+  "ParentComponentInfo": null
+}

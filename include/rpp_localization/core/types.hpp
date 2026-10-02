@@ -16,7 +16,7 @@ using ControlVector = Eigen::VectorXd;
 using TimestampNs = std::int64_t;
 using DurationNs = std::int64_t;
 
-[[nodiscard]] constexpr double nanosecondsToSeconds(const TimestampNs nanoseconds) noexcept
+[[nodiscard]] constexpr double nanoseconds_to_seconds(const TimestampNs nanoseconds) noexcept
 {
   return static_cast<double>(nanoseconds) * 1e-9;
 }

@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: (c) 2014, 2015, 2016 Charles River Analytics, Inc.
- * SPDX-License-Identifier: BSD-3-Clause
- */
 #include "rpp_localization/ros/ros_filter.hpp"
 
 #include <algorithm>
@@ -31,32 +27,29 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/qos.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/filters/ekf.hpp"
-#include "rpp_localization/models/constant_acc_model.hpp"
-#include "rpp_localization/filters/ukf.hpp"
+#include "rpp_localization/filters/extended_kalman_filter.hpp"
+#include "rpp_localization/models/constant_acceleration_model.hpp"
+#include "rpp_localization/filters/unscented_kalman_filter.hpp"
 #include "rpp_localization/core/filter_common.hpp"
-#include "rpp_localization/core/filter_state.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_srvs/srv/empty.hpp"
-#include "tf2/LinearMath/Matrix3x3.h"
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2/LinearMath/Transform.h"
-#include "tf2/LinearMath/Vector3.h"
+#include "tf2/LinearMath/Matrix3x3.hpp"
+#include "tf2/LinearMath/Quaternion.hpp"
+#include "tf2/LinearMath/Transform.hpp"
+#include "tf2/LinearMath/Vector3.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
-#include "tf2_ros/transform_broadcaster.h"
-#include "tf2_ros/transform_listener.h"
-#include "rpp_localization/inekf/inekf.hpp"
-#include "rpp_localization/inekf/inertial_process.hpp"
+#include "tf2_ros/transform_broadcaster.hpp"
+#include "tf2_ros/transform_listener.hpp"
 
 namespace rpp_localization
 {
 using namespace std::chrono_literals;
 
-template<typename T>
-RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
-: RosFilterBase<T>(options, true),
+RosFilter::RosFilter(
+  const rclcpp::NodeOptions & options, std::string default_configuration)
+: RosFilterBase(options, true, std::move(default_configuration)),
   publish_acceleration_(false),
   publish_transform_(true),
   disabled_at_startup_(false),
@@ -66,8 +59,7 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
   this->tf_listener_ = std::make_shared<tf2_ros::TransformListener>(this->_tf_buffer->get_buffer());
 }
 
-template<typename T>
-RosFilter<T>::~RosFilter()
+RosFilter::~RosFilter()
 {
   this->_tf_buffer.reset();
   topic_subs_.clear();
@@ -81,24 +73,23 @@ RosFilter<T>::~RosFilter()
   position_pub_.reset();
 }
 
-template<typename T>
-void RosFilter<T>::init()
+void RosFilter::init()
 {
-  RosFilterBase<T>::init();
+  RosFilterBase::init();
 
   world_transform_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(
-    RosFilterBase<T>::shared_from_this());
+    RosFilterBase::shared_from_this());
 
-  loadParams();
+  load_params();
 
   if (this->print_diagnostics_) {
     this->diagnostic_updater_->add(
       "Filter diagnostic updater",
-      std::bind(&RosFilterBase<T>::aggregateDiagnostics, this, std::placeholders::_1));
+      std::bind(&RosFilterBase::aggregate_diagnostics, this, std::placeholders::_1));
   }
 
   // Init the last measurement time so we don't get a huge initial delta
-  this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
+  this->set_rpp_filter_last_measurement_time(ros::to_timestamp_ns(this->now()));
 
   // Position publisher
   rclcpp::PublisherOptions publisher_options;
@@ -117,18 +108,16 @@ void RosFilter<T>::init()
   const std::chrono::duration<double> timespan{1.0 / this->frequency_};
   timer_ = rclcpp::GenericTimer<rclcpp::VoidCallbackType>::make_shared(
     this->get_clock(), std::chrono::duration_cast<std::chrono::nanoseconds>(timespan),
-    std::bind(&RosFilter<T>::periodicUpdate, this), this->get_node_base_interface()->get_context());
+    std::bind(&RosFilter::periodic_update, this), this->get_node_base_interface()->get_context());
   this->get_node_timers_interface()->add_timer(timer_, nullptr);
 }
 
-template<typename T>
-void RosFilter<T>::reset()
+void RosFilter::reset()
 {
-  RosFilterBase<T>::reset();
+  RosFilterBase::reset();
 }
 
-template<typename T>
-void RosFilter<T>::resetSrvCallback(
+void RosFilter::reset_srv_callback(
   const std::shared_ptr<rmw_request_id_t>,
   const std::shared_ptr<std_srvs::srv::Empty::Request>,
   const std::shared_ptr<std_srvs::srv::Empty::Response>)
@@ -140,8 +129,7 @@ void RosFilter<T>::resetSrvCallback(
   reset();
 }
 
-template<typename T>
-void RosFilter<T>::toggleFilterProcessingCallback(
+void RosFilter::toggle_filter_processing_callback(
   const std::shared_ptr<rmw_request_id_t>/*request_header*/,
   const std::shared_ptr<
     rpp_localization::srv::ToggleFilterProcessing::Request> req,
@@ -165,8 +153,7 @@ void RosFilter<T>::toggleFilterProcessingCallback(
 
 
 
-template<typename T>
-void RosFilter<T>::loadParams()
+void RosFilter::load_params()
 {
   this->load_filter_params();
 
@@ -191,27 +178,27 @@ void RosFilter<T>::loadParams()
   this->set_pose_sub_ =
     rclcpp::Node::create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "set_pose", rclcpp::QoS(1),
-    std::bind(&RosFilter<T>::setPoseCallback, this, std::placeholders::_1));
+    std::bind(&RosFilter::set_pose_callback, this, std::placeholders::_1));
 
   // Create a service for manually setting/resetting pose
   this->set_pose_service_ =
     rclcpp::Node::create_service<rpp_localization::srv::SetPose>(
     "set_pose", std::bind(
-      &RosFilter<T>::setPoseSrvCallback, this,
+      &RosFilter::set_pose_srv_callback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 
   // Create a service for manually enabling the filter
   this->enable_filter_srv_ =
     rclcpp::Node::create_service<std_srvs::srv::Empty>(
     "enable", std::bind(
-      &RosFilter::enableFilterSrvCallback, this,
+      &RosFilter::enable_filter_srv_callback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 
   // Create a service for manually setting/resetting pose
   this->reset_srv_ =
     rclcpp::Node::create_service<std_srvs::srv::Empty>(
     "reset", std::bind(
-      &RosFilter<T>::resetSrvCallback, this,
+      &RosFilter::reset_srv_callback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 
   // Create a service for toggling processing new measurements while still
@@ -219,14 +206,14 @@ void RosFilter<T>::loadParams()
   this->toggle_filter_processing_srv_ =
     rclcpp::Node::create_service<rpp_localization::srv::ToggleFilterProcessing>(
     "toggle", std::bind(
-      &RosFilter<T>::toggleFilterProcessingCallback, this,
+      &RosFilter::toggle_filter_processing_callback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
   // If we're using control, set the parameters and create the necessary
   // subscribers
-  if (this->filter_.use_control()) {
+  if (this->rpp_filter_uses_control()) {
     this->control_sub_ = rclcpp::Node::create_subscription<geometry_msgs::msg::Twist>(
       "cmd_vel", rclcpp::QoS(1),
-      std::bind(&RosFilter<T>::controlCallback, this, std::placeholders::_1));
+      std::bind(&RosFilter::control_callback, this, std::placeholders::_1));
   }
 
   std::vector<CallbackData> pose_callback_data_v;
@@ -234,12 +221,12 @@ void RosFilter<T>::loadParams()
   std::vector<CallbackData> acc_callback_data_v;
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&, const CallbackData&)>
-  on_registered_odom = [this](const std::string& topic, const std::string& topic_name, int queue_size,
+  on_registered_odom = [this](const std::string& topic_name, const std::string& topic, int queue_size,
       const CallbackData& pose_callback_data, const CallbackData& twist_callback_data)
   {
     std::function<void(const std::shared_ptr<nav_msgs::msg::Odometry>)>
     odom_callback = std::bind(
-      &RosFilterBase<T>::odometryCallback, this,
+      &RosFilterBase::odometry_callback, this,
       std::placeholders::_1, topic_name,
       pose_callback_data, twist_callback_data);
     auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
@@ -249,7 +236,7 @@ void RosFilter<T>::loadParams()
         odom_callback));
 
   };
-  auto shared_this = RosFilterBase<T>::shared_from_this();
+  auto shared_this = RosFilterBase::shared_from_this();
   ros_filter_utilities::handle_odom_params(*shared_this,
     &this->_debug_stream,
     pose_callback_data_v,
@@ -258,12 +245,12 @@ void RosFilter<T>::loadParams()
   );
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&)>
-  on_registered_pose = [this](const std::string& topic, const std::string& topic_name, int queue_size,
+  on_registered_pose = [this](const std::string& topic, const std::string&, int queue_size,
       const CallbackData& pose_callback_data)
   {
     std::function<void(const std::shared_ptr<geometry_msgs::msg::PoseWithCovarianceStamped>)>
     pose_callback = std::bind(
-      &RosFilterBase<T>::poseCallback, this,
+      &RosFilterBase::pose_callback, this,
       std::placeholders::_1,
       pose_callback_data,
       this->world_frame_id_, this->base_link_frame_id_, false);
@@ -283,12 +270,12 @@ void RosFilter<T>::loadParams()
 
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&)>
-  on_registered_twist = [this](const std::string& topic, const std::string& topic_name, int queue_size,
+  on_registered_twist = [this](const std::string& topic, const std::string&, int queue_size,
       const CallbackData& twist_callback_data)
   {
     std::function<void(const std::shared_ptr<geometry_msgs::msg::TwistWithCovarianceStamped>)>
     twist_callback = std::bind(
-      &RosFilterBase<T>::twistCallback, this,
+      &RosFilterBase::twist_callback, this,
       std::placeholders::_1,
       twist_callback_data, this->base_link_frame_id_);
     auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
@@ -308,12 +295,12 @@ void RosFilter<T>::loadParams()
 
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&, const CallbackData&, const CallbackData&)>
-  on_registered_imu = [this](const std::string& topic, const std::string& topic_name, int queue_size,
+  on_registered_imu = [this](const std::string& topic_name, const std::string& topic, int queue_size,
       const CallbackData& pose_callback_data, const CallbackData& twist_callback_data, const CallbackData& acc_callback_data)
   {
     std::function<void(const std::shared_ptr<sensor_msgs::msg::Imu>)>
     imu_callback = std::bind(
-      &RosFilterBase<T>::imuCallback, this,
+      &RosFilterBase::imu_callback, this,
       std::placeholders::_1,
       topic_name, pose_callback_data, twist_callback_data, acc_callback_data);
     auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
@@ -324,7 +311,7 @@ void RosFilter<T>::loadParams()
 
   };
 
-  auto control_update_vector = this->filter_.get_control_update_vector();
+  auto control_update_vector = this->rpp_filter_control_update_vector();
   ros_filter_utilities::handle_imu_params(*shared_this,
     &this->_debug_stream, control_update_vector,
     this->remove_gravitational_acceleration_,
@@ -346,8 +333,7 @@ void RosFilter<T>::loadParams()
 }
 
 
-template<typename T>
-void RosFilter<T>::periodicUpdate()
+void RosFilter::periodic_update()
 {
   // Wait for the filter to be enabled
   if (!this->enabled_) {
@@ -363,15 +349,15 @@ void RosFilter<T>::periodicUpdate()
   if (this->toggled_on_) {
     // Now we'll integrate any measurements we've received if requested,
     // and update angular acceleration.
-    this->integrateMeasurements(cur_time);
-    this->differentiateMeasurements(cur_time);
+    this->integrate_measurements(cur_time);
+    this->differentiate_measurements(cur_time);
   } else {
     // Clear out measurements since we're not currently processing new entries
-    this->clearMeasurementQueue();
+    this->clear_measurement_queue();
 
     // Reset last measurement time so we don't get a large time delta on toggle
-    if (this->filter_.get_initialized_status()) {
-      this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
+    if (this->rpp_filter_initialized()) {
+      this->set_rpp_filter_last_measurement_time(ros::to_timestamp_ns(this->now()));
     }
   }
 
@@ -380,7 +366,7 @@ void RosFilter<T>::periodicUpdate()
 
   bool corrected_data = false;
 
-  if (this->getFilteredOdometryMessage(filtered_position.get())) {
+  if (this->get_filtered_odometry_message(filtered_position.get())) {
     this->world_base_link_trans_msg_.header.stamp =
       static_cast<rclcpp::Time>(filtered_position->header.stamp) + this->tf_time_offset_;
     this->world_base_link_trans_msg_.header.frame_id =
@@ -399,7 +385,7 @@ void RosFilter<T>::periodicUpdate()
 
     // The filtered_position is the message containing the state and covariances:
     // nav_msgs Odometry
-    if (!this->validateFilterOutput(filtered_position.get())) {
+    if (!this->validate_filter_output(filtered_position.get())) {
       RCLCPP_ERROR(
         this->get_logger(),
         "Critical Error, NaNs were detected in the output state of the filter. "
@@ -431,8 +417,7 @@ void RosFilter<T>::periodicUpdate()
 
           tf2::Transform base_link_odom_trans;
           tf2::fromMsg(
-            this->_tf_buffer
-            ->lookupTransform(
+            this->_tf_buffer->lookup_transform(
               this->base_link_frame_id_,
               this->odom_frame_id_,
               tf2::TimePointZero)
@@ -503,7 +488,7 @@ void RosFilter<T>::periodicUpdate()
   // Publish the acceleration if desired and filter is initialized
   auto filtered_acceleration = std::make_unique<geometry_msgs::msg::AccelWithCovarianceStamped>();
   if (!corrected_data && this->publish_acceleration_ &&
-    this->getFilteredAccelMessage(filtered_acceleration.get()))
+    this->get_filtered_accel_message(filtered_acceleration.get()))
   {
     this->accel_pub_->publish(std::move(filtered_acceleration));
   }
@@ -524,9 +509,9 @@ void RosFilter<T>::periodicUpdate()
 
   // Clear out expired history data
   if (this->smooth_lagged_data_) {
-    this->clearExpiredHistory(
-      this->filter_.get_last_measurement_time() -
-      ros::toDurationNs(this->history_length_));
+    this->clear_expired_history(
+      this->rpp_filter_last_measurement_time() -
+      ros::to_duration_ns(this->history_length_));
   }
 
   // Warn the user if the update took too long
@@ -540,12 +525,11 @@ void RosFilter<T>::periodicUpdate()
   }
 }
 
-template<typename T>
-void RosFilter<T>::setPoseCallback(
+void RosFilter::set_pose_callback(
   const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
 {
   RF_DEBUG(
-    "------ RosFilter<T>::setPoseCallback ------\nPose message:\n" << msg);
+    "------ RosFilter::set_pose_callback ------\nPose message:\n" << msg);
 
   RCLCPP_INFO_STREAM(
     this->get_logger(),
@@ -558,7 +542,7 @@ void RosFilter<T>::setPoseCallback(
   this->previous_measurements_.clear();
   this->previous_measurement_covariances_.clear();
 
-  this->clearMeasurementQueue();
+  this->clear_measurement_queue();
 
   this->filter_state_history_.clear();
   this->measurement_history_.clear();
@@ -582,21 +566,20 @@ void RosFilter<T>::setPoseCallback(
   // Prepare the pose data (really just using this to transform it into the
   // target frame). Twist data is going to get zeroed out.
   // Since pose messages do not provide a child_frame_id, it defaults to baseLinkFrameId_
-  this->preparePose(
+  this->prepare_pose(
     msg, topic_name, this->world_frame_id_, this->base_link_frame_id_, false, false, false,
     update_vector, measurement, measurement_covariance);
 
   // For the state
-  this->filter_.set_state(measurement);
-  this->filter_.set_estimate_error_covariance(measurement_covariance);
+  this->set_rpp_filter_state(measurement);
+  this->set_rpp_filter_covariance(measurement_covariance);
 
-  this->filter_.set_last_measurement_time(ros::toTimestampNs(this->now()));
+  this->set_rpp_filter_last_measurement_time(ros::to_timestamp_ns(this->now()));
 
-  RF_DEBUG("\n------ /RosFilter<T>::setPoseCallback ------\n");
+  RF_DEBUG("\n------ /RosFilter::set_pose_callback ------\n");
 }
 
-template<typename T>
-bool RosFilter<T>::setPoseSrvCallback(
+bool RosFilter::set_pose_srv_callback(
   const std::shared_ptr<rmw_request_id_t>/*request_header*/,
   const std::shared_ptr<rpp_localization::srv::SetPose::Request> request,
   std::shared_ptr<rpp_localization::srv::SetPose::Response>/*response*/)
@@ -604,20 +587,19 @@ bool RosFilter<T>::setPoseSrvCallback(
   geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg =
     std::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>(
     request->pose);
-  this->setPoseCallback(msg);
+  this->set_pose_callback(msg);
 
   return true;
 }
 
-template<typename T>
-bool RosFilter<T>::enableFilterSrvCallback(
+bool RosFilter::enable_filter_srv_callback(
   const std::shared_ptr<rmw_request_id_t>,
   const std::shared_ptr<std_srvs::srv::Empty::Request>,
   const std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
   RF_DEBUG(
     "\n[" << this->get_name() << ":]" <<
-      " ------ /RosFilter::enableFilterSrvCallback ------\n");
+      " ------ /RosFilter::enable_filter_srv_callback ------\n");
   if (enabled_) {
     RCLCPP_WARN(
       this->get_logger(),
@@ -637,7 +619,4 @@ bool RosFilter<T>::enableFilterSrvCallback(
 
 
 }  // namespace rpp_localization
-template class rpp_localization::RosFilter<rpp_localization::Ekf<rpp_localization::ConstantAccelerationModel>>;
-template class rpp_localization::RosFilter<rpp_localization::Ukf<rpp_localization::ConstantAccelerationModel>>;
-template class rpp_localization::RosFilter<rpp_localization::InEkf<rpp_localization::InEKF::InertialProcess>>;
 

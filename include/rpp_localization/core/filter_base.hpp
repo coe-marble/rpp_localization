@@ -1,8 +1,7 @@
 #pragma once
 
-#include "rpp_localization/core/measurement.hpp"
+#include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/model_base.hpp"
-#include "rpp_localization/core/runtime_filter.hpp"
 
 #include <ostream>
 #include <stdexcept>
@@ -10,15 +9,15 @@
 namespace rpp_localization
 {
 
-// Compatibility base for legacy filters. The model pointer is non-owning;
-// model ownership remains with each concrete filter.
-class FilterBase : public RuntimeFilter
+// Core contract for filters. The model is non-owning and must outlive its filter;
+// the RPP composition root owns both objects.
+class FilterBase
 {
 public:
   explicit FilterBase(const int state_dim)
-  : _debug(false),
+  : _state_dim(state_dim),
+    _debug(false),
     _debug_stream(nullptr),
-    _state_dim(state_dim),
     _model_as_base(nullptr)
   {
     if (state_dim <= 0)
@@ -29,12 +28,21 @@ public:
 
   virtual ~FilterBase() = default;
 
-  void correct(const Measurement& measurement) override = 0;
-  void predict(TimestampNs reference_time, DurationNs delta) override = 0;
+  virtual void correct(const Measurement& measurement) = 0;
+  virtual void predict(TimestampNs reference_time, DurationNs delta) = 0;
 
   [[nodiscard]] ModelBase* get_model()
   {
     return _model_as_base;
+  }
+
+  [[nodiscard]] StateVector get_state() const
+  {
+    if (_model_as_base == nullptr)
+    {
+      throw std::logic_error("filter model is not initialized");
+    }
+    return _model_as_base->get_state();
   }
 
   [[nodiscard]] bool get_debug() const
