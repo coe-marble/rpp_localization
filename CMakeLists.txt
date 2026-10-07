@@ -105,6 +105,9 @@ if(BUILD_TESTING)
     test/test_constant_acceleration_model_parity.cpp)
   target_link_libraries(test_constant_acceleration_model_parity ${core_library_name})
 
+  ament_add_gtest(test_ukf test/test_ukf.cpp)
+  target_link_libraries(test_ukf ${core_library_name})
+
   if(RPP_LOCALIZATION_ENABLE_PLUGIN_TESTS)
     ament_add_gtest(
       test_localization_plugin_boundary

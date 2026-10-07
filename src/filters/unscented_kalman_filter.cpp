@@ -91,7 +91,12 @@ void Ukf::correct(const Measurement & measurement)
   // time stamps). In that event, the sigma points need to be updated to reflect
   // the current state. Throughout prediction and correction, we attempt to
   // maximize efficiency in Eigen.
-  if (!uncorrected_) {
+  const bool sigma_points_are_current =
+    uncorrected_ &&
+    sigma_points_state_.size() == state.size() &&
+    sigma_points_state_ == state &&
+    sigma_points_covariance_ == state_covariance;
+  if (!sigma_points_are_current) {
     generate_sigma_points(state, state_covariance);
   }
 
@@ -245,7 +250,8 @@ void Ukf::correct(const Measurement & measurement)
         update_indices[i] == StateMemberYaw)
       {
         sigma_diff(i) = angles::normalize_angle(sigma_diff(i));
-        sigma_state_diff(i) = angles::normalize_angle(sigma_state_diff(i));
+        sigma_state_diff(update_indices[i]) =
+          angles::normalize_angle(sigma_state_diff(update_indices[i]));
       }
     }
 
@@ -282,9 +288,11 @@ void Ukf::correct(const Measurement & measurement)
   {
     state.noalias() += kalman_gain_subset * innovation_subset;
 
-    // (6) Compute the new estimate error covariance P = P - (K * P_zz * K')
+    // (6) Compute the new estimate error covariance P = P - K * S * K', where
+    // S = P_zz + R is the innovation covariance the gain was computed with.
     state_covariance.noalias() -=
-      (kalman_gain_subset * predicted_meas_covar *
+      (kalman_gain_subset *
+      (predicted_meas_covar + measurement_covariance_subset) *
       kalman_gain_subset.transpose());
 
     filter_utilities::wrap_state_angles(state);
@@ -378,6 +386,8 @@ void Ukf::predict(
 
   // Mark that we can keep these sigma points
   uncorrected_ = true;
+  sigma_points_state_ = state;
+  sigma_points_covariance_ = state_covariance;
   _model_as_base->set_state(std::move(state));
   FB_DEBUG(
     "Predicted state is:\n" << state <<
