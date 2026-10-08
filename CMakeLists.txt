@@ -94,6 +94,15 @@ target_link_libraries(localization_node PRIVATE ${core_library_name})
 target_link_libraries(ekf_node PRIVATE ${core_library_name})
 target_link_libraries(ukf_node PRIVATE ${core_library_name})
 
+add_executable(navsat_pose_node src/ros/nodes/navsat_pose_node.cpp)
+target_include_directories(navsat_pose_node PRIVATE include)
+target_link_libraries(navsat_pose_node PRIVATE
+  Eigen3::Eigen
+  geometry_msgs::geometry_msgs
+  rclcpp::rclcpp
+  sensor_msgs::sensor_msgs
+)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
@@ -107,6 +116,10 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_ukf test/test_ukf.cpp)
   target_link_libraries(test_ukf ${core_library_name})
+
+  ament_add_gtest(test_geodetic test/test_geodetic.cpp)
+  target_include_directories(test_geodetic PRIVATE include)
+  target_link_libraries(test_geodetic Eigen3::Eigen)
 
   if(RPP_LOCALIZATION_ENABLE_PLUGIN_TESTS)
     ament_add_gtest(
@@ -133,7 +146,7 @@ install(TARGETS ${core_library_name}
   RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
 )
-install(TARGETS localization_node ekf_node ukf_node
+install(TARGETS localization_node ekf_node ukf_node navsat_pose_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY

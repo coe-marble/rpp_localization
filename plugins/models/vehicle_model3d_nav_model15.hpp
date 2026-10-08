@@ -6,6 +6,8 @@
 
 #include <rpp_localization/core/filter_common.hpp>
 
+#include <kj/exception.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -126,6 +128,12 @@ public:
     catch (const std::exception& error)
     {
       set_status(output, k_model_failure, error.what());
+      return output;
+    }
+    catch (const kj::Exception& error)
+    {
+      // A vehicle model in another process reports its failure this way.
+      set_status(output, k_model_failure, error.getDescription().cStr());
       return output;
     }
   }

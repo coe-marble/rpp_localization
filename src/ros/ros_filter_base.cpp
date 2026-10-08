@@ -84,6 +84,8 @@ RosFilterBase::RosFilterBase(
   rpp_sensor_timeout_(rclcpp::Duration::from_nanoseconds(0))
 {
   default_configuration_ = std::move(default_configuration);
+  _latest_control.stamp = 0;
+  _latest_control.control.setZero(TWIST_SIZE);
 
   this->_tf_buffer = std::make_unique<TfBufferWrapper>(this->get_clock(), online);
   state_variable_names_.push_back("X");
@@ -2563,10 +2565,14 @@ void RosFilterBase::initialize_rpp_filter()
   const auto configuration = declare_parameter<std::string>(
     "configuration", default_configuration_);
   const auto script = parse_script_reference(script_reference);
+  // The composition is read from the script's own package unless another
+  // workspace that links the script supplies it.
+  const auto workspace = declare_parameter<std::string>("rpp_workspace", "");
 
   rpp::RppDataManager data_manager(
     rpp::RPP_HOME,
-    ament_index_cpp::get_package_share_path(script.library).string());
+    workspace.empty() ?
+    ament_index_cpp::get_package_share_path(script.library).string() : workspace);
   rpp::ComponentContextBuilder context_builder(data_manager);
   const std::optional<std::string> selected_configuration = configuration.empty() ?
     std::nullopt : std::optional<std::string>(configuration);
