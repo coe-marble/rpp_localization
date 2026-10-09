@@ -51,6 +51,8 @@ add_library(${core_library_name} SHARED
   src/core/filter_utilities.cpp
   src/filters/extended_kalman_filter.cpp
   src/filters/unscented_kalman_filter.cpp
+  src/inekf/inertial_process.cpp
+  src/inekf/invariant_ekf.cpp
   src/models/constant_acceleration_model.cpp
   src/models/navigation_model_base.cpp
   src/ros/ros_filter.cpp
@@ -94,6 +96,9 @@ target_link_libraries(localization_node PRIVATE ${core_library_name})
 target_link_libraries(ekf_node PRIVATE ${core_library_name})
 target_link_libraries(ukf_node PRIVATE ${core_library_name})
 
+add_executable(inekf_node src/ros/nodes/inekf_node.cpp)
+target_link_libraries(inekf_node PRIVATE ${core_library_name})
+
 add_executable(navsat_pose_node src/ros/nodes/navsat_pose_node.cpp)
 target_include_directories(navsat_pose_node PRIVATE include)
 target_link_libraries(navsat_pose_node PRIVATE
@@ -116,6 +121,13 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_ukf test/test_ukf.cpp)
   target_link_libraries(test_ukf ${core_library_name})
+
+  ament_add_gtest(test_invariant_ekf test/test_invariant_ekf.cpp)
+  target_link_libraries(test_invariant_ekf ${core_library_name})
+
+  ament_add_gtest(
+    test_inekf_process_contract test/test_inekf_process_contract.cpp)
+  target_link_libraries(test_inekf_process_contract ${core_library_name})
 
   ament_add_gtest(test_geodetic test/test_geodetic.cpp)
   target_include_directories(test_geodetic PRIVATE include)
@@ -146,12 +158,13 @@ install(TARGETS ${core_library_name}
   RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
 )
-install(TARGETS localization_node ekf_node ukf_node navsat_pose_node
+install(TARGETS localization_node ekf_node ukf_node inekf_node navsat_pose_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY
   include/rpp_localization/core
   include/rpp_localization/filters
+  include/rpp_localization/inekf
   include/rpp_localization/models
   include/rpp_localization/ros
   DESTINATION include/rpp_localization

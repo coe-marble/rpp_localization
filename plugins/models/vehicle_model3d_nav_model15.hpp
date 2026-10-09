@@ -70,6 +70,14 @@ public:
     ready_ = vehicle_model_ != nullptr;
   }
 
+  NavModelDescription15::Const describe() override
+  {
+    // Control is forwarded to the vehicle as actuator commands.
+    NavModelDescription15 description;
+    description.controlDrivesAcceleration() = false;
+    return description;
+  }
+
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
     LocalizationModelPredictOutput15 output;

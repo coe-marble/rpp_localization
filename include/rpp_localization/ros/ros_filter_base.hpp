@@ -249,6 +249,9 @@ protected:
   [[nodiscard]] const CovarianceMatrix & rpp_filter_covariance() const noexcept;
   [[nodiscard]] const ControlCommand & rpp_filter_control() const noexcept;
   [[nodiscard]] const std::vector<bool> & rpp_filter_control_update_vector() const noexcept;
+  void set_rpp_filter_control_update_vector(const std::vector<bool> & control_update_vector);
+  /// Whether the model of the RPP filter turns its control into an acceleration.
+  [[nodiscard]] bool rpp_model_control_drives_acceleration() const;
   [[nodiscard]] TimestampNs rpp_filter_last_measurement_time() const noexcept;
   [[nodiscard]] const rclcpp::Duration & rpp_filter_sensor_timeout() const noexcept;
 

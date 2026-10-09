@@ -57,6 +57,13 @@ public:
 
   void initialize(const rpp::ComponentContext&) override {}
 
+  NavModelDescription15::Const describe() override
+  {
+    NavModelDescription15 description;
+    description.controlDrivesAcceleration() = true;
+    return description;
+  }
+
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
     reference_time_ = input.referenceTimeNs();

@@ -217,6 +217,15 @@ public:
     return result;
   }
 
+  NavModelDescription15::Const describeModel() override
+  {
+    if (!model_component_)
+    {
+      throw std::logic_error("NavModel15 component is not initialized");
+    }
+    return model_component_->describe();
+  }
+
   LocalizationFilterResult15::Const getEstimate() override
   {
     LocalizationFilterResult15 result;

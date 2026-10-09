@@ -112,8 +112,11 @@ void handle_twist_params(rclcpp::Node& node, std::ofstream* debug_stream,
   const std::function<void(const std::string&, const std::string&, int, const CallbackData&)>& on_registered_topic = nullptr
 );
 
+/// control_drives_acceleration says whether a measured acceleration replaces
+/// the control on its axis; control_update_vector is updated accordingly.
 void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
   std::vector<bool>& control_update_vector,
+  bool control_drives_acceleration,
   std::map<std::string, bool>& remove_gravitational_acceleration,
   std::vector<CallbackData>& pose_callback_data_v,
   std::vector<CallbackData>& twist_callback_data_v,

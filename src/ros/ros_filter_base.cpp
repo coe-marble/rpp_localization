@@ -2747,6 +2747,23 @@ const std::vector<bool> & RosFilterBase::rpp_filter_control_update_vector() cons
   return rpp_control_update_vector_;
 }
 
+void RosFilterBase::set_rpp_filter_control_update_vector(
+  const std::vector<bool> & control_update_vector)
+{
+  if (control_update_vector.size() != static_cast<std::size_t>(TWIST_SIZE)) {
+    throw std::invalid_argument("control update vector must contain six values");
+  }
+  rpp_control_update_vector_ = control_update_vector;
+}
+
+bool RosFilterBase::rpp_model_control_drives_acceleration() const
+{
+  if (!rpp_filter_) {
+    throw std::logic_error("RPP filter is not initialized");
+  }
+  return rpp_filter_->describeModel().controlDrivesAcceleration();
+}
+
 TimestampNs RosFilterBase::rpp_filter_last_measurement_time() const noexcept
 {
   return rpp_last_measurement_time_;

@@ -22,6 +22,17 @@
       "Type": "file",
       "Path": "plugins/models/vehicle_model3d_nav_model15.hpp",
       "Name": "VehicleModel3DNavModel15"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/models/imu_inertial_model.hpp",
+      "Name": "ImuInertialModel"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/inekf_plugin.hpp",
+      "Name": "Inekf",
+      "PluginType": "rpp_localization::InvariantFilter"
     }
   ],
   "PluginTypes": [

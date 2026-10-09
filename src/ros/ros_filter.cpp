@@ -314,12 +314,14 @@ void RosFilter::load_params()
   auto control_update_vector = this->rpp_filter_control_update_vector();
   ros_filter_utilities::handle_imu_params(*shared_this,
     &this->_debug_stream, control_update_vector,
+    this->rpp_model_control_drives_acceleration(),
     this->remove_gravitational_acceleration_,
     pose_callback_data_v,
     twist_callback_data_v,
     acc_callback_data_v,
     on_registered_imu
   );
+  this->set_rpp_filter_control_update_vector(control_update_vector);
 
   this->count_var_counts(pose_callback_data_v, twist_callback_data_v, acc_callback_data_v);
 

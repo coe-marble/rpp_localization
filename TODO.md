@@ -34,14 +34,19 @@
       supply model-specific process and filter tuning.
 - [ ] Restore/adapt ROS coverage after the structural merge; do not change
       InEKF in this work.
-- [x] Exclude InEKF from the EKF/UKF-only build without deleting its source.
 
-## Deferred InEKF work
+## InEKF
 
-- [ ] Design a dedicated RPP process and measurement contract for the
-      Lie-group InEKF state, tangent covariance, and IMU input.
-- [ ] Port InEKF only after that contract exists; do not force it into
-      `NavModel15` or the 15-state EKF/UKF lifecycle.
+- [x] Design a dedicated RPP process and measurement contract for the
+      Lie-group InEKF state, tangent covariance, and IMU input
+      (`InertialModel`, `InvariantFilter`).
+- [x] Port the InEKF behind that contract as a right-invariant filter with
+      IMU biases, without forcing it into `NavModel15` or the 15-state
+      EKF/UKF lifecycle (`ImuInertialModel`, `Inekf`, `inekf_node`).
+- [ ] Left-invariant error convention; the contract carries the flag but
+      only the right-invariant form is implemented.
+- [ ] Measurement history and replay of late measurements.
+- [ ] Sensor frames rotated against the base link.
 
 ## Verification
 
