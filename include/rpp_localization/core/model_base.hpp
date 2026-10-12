@@ -53,6 +53,9 @@ public:
     const TimestampNs reference_time,
     const DurationNs delta)
   {
+    // A model may propagate the covariance it is given regardless of
+    // whether the caller needs it; start from zero so it cannot accumulate.
+    _cov_dontcare.setZero();
     predict(state, _cov_dontcare, reference_time, delta);
   }
 

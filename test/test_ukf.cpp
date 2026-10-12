@@ -194,5 +194,65 @@ TEST(UkfTest, prediction_moves_the_position_along_the_heading)
   EXPECT_NEAR(ukf.model.get_state()(StateMemberY), 1.0, 1e-4);
 }
 
+TEST(UkfTest, prediction_keeps_an_angle_that_nothing_measures)
+{
+  // The default sigma spread, which makes the central weight about -1e6.
+  ConstantAccelerationModel model(STATE_SIZE);
+  Ukf filter(model);
+  model.initialize_runtime();
+  model.set_process_noise_covariance(process_noise());
+  filter.initialize_runtime(process_noise(), false, 0.001, 0.0, 2.0);
+  Eigen::VectorXd state = Eigen::VectorXd::Zero(STATE_SIZE);
+  state(StateMemberRoll) = -3.1;
+  Eigen::MatrixXd covariance = diagonal_covariance(0.01);
+  covariance(StateMemberRoll, StateMemberRoll) = 40.0;
+  model.set_state(state);
+  model.set_state_covariance(covariance);
+
+  filter.predict(0, 33'000'000);
+
+  EXPECT_NEAR(model.get_state()(StateMemberRoll), -3.1, 1e-2);
+  EXPECT_GT(model.get_state_covariance()(StateMemberRoll, StateMemberRoll), 39.0);
+  expect_symmetric_positive_definite(model.get_state_covariance());
+}
+
+TEST(UkfTest, correction_leaves_states_without_uncertainty_untouched)
+{
+  // The estimate right after start-up: only the measured states have a
+  // variance, and the covariance is singular.
+  ConstantAccelerationModel model(STATE_SIZE);
+  Ukf filter(model);
+  model.initialize_runtime();
+  model.set_process_noise_covariance(process_noise());
+  filter.initialize_runtime(process_noise(), false, 0.001, 0.0, 2.0);
+  Eigen::MatrixXd covariance = Eigen::MatrixXd::Zero(STATE_SIZE, STATE_SIZE);
+  covariance(StateMemberYaw, StateMemberYaw) = 0.0076;
+  model.set_state(Eigen::VectorXd::Zero(STATE_SIZE));
+  model.set_state_covariance(covariance);
+
+  filter.correct(measure({StateMemberVyaw}, {0.1}, 0.0019));
+
+  EXPECT_TRUE(model.get_state().allFinite());
+  EXPECT_GE(model.get_state_covariance().diagonal().minCoeff(), 0.0);
+  EXPECT_DOUBLE_EQ(model.get_state()(StateMemberVyaw), 0.0);
+}
+
+TEST(UkfTest, prediction_survives_a_slightly_indefinite_covariance)
+{
+  Eigen::VectorXd state = Eigen::VectorXd::Zero(STATE_SIZE);
+  state(StateMemberVx) = 1.0;
+  // What rounding in the covariance update leaves behind on a state that
+  // nothing measures: a small negative eigenvalue.
+  Eigen::MatrixXd covariance = diagonal_covariance(0.01);
+  covariance(StateMemberYaw, StateMemberYaw) = -1e-9;
+  UkfUnderTest ukf(state, covariance);
+
+  ukf.filter.predict(0, 100'000'000);
+
+  EXPECT_TRUE(ukf.model.get_state().allFinite());
+  EXPECT_TRUE(ukf.model.get_state_covariance().allFinite());
+  EXPECT_NEAR(ukf.model.get_state()(StateMemberX), 0.1, 1e-3);
+}
+
 }  // namespace
 }  // namespace rpp_localization
