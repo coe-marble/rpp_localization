@@ -51,8 +51,9 @@
 
 ## Performance
 
-- [ ] Plugins are compiled without optimisation. The UKF then cannot hold
-      10 Hz with a 200 Hz IMU; it reaches about 2 Hz on a recorded AUV run.
+- [ ] The registrator compiles plugins without optimisation, which slows
+      every filter. With a 200 Hz IMU the UKF reaches 2-5 Hz where 10 Hz is
+      asked, and the EKF holds 10 Hz with less than 3x margin.
 
 ## Verification
 
