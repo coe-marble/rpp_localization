@@ -60,6 +60,23 @@ add_library(${core_library_name} SHARED
   src/ros/ros_filter_utilities.cpp
 )
 
+# Eigen is an order of magnitude slower without optimization, which the
+# filters cannot afford at sensor rates. The numerical sources are therefore
+# optimized even when no build type is set; the ROS and RPP glue is not,
+# because it only links without optimization.
+if(NOT CMAKE_BUILD_TYPE)
+  set_source_files_properties(
+    src/core/filter_utilities.cpp
+    src/filters/extended_kalman_filter.cpp
+    src/filters/unscented_kalman_filter.cpp
+    src/inekf/inertial_process.cpp
+    src/inekf/invariant_ekf.cpp
+    src/models/constant_acceleration_model.cpp
+    src/models/navigation_model_base.cpp
+    PROPERTIES COMPILE_OPTIONS "-O2"
+  )
+endif()
+
 target_include_directories(${core_library_name}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

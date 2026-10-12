@@ -46,12 +46,21 @@
 - [ ] Left-invariant error convention; the contract carries the flag but
       only the right-invariant form is implemented.
 - [ ] Measurement history and replay of late measurements.
-- [ ] Sensor frames rotated against the base link.
+- [ ] Add the gyroscope noise of the lever arm to the covariance of a body
+      velocity measured away from the IMU.
+
+## Performance
+
+- [ ] Plugins are compiled without optimisation. The UKF then cannot hold
+      10 Hz with a 200 Hz IMU; it reaches about 2 Hz on a recorded AUV run.
 
 ## Verification
 
-- [ ] Build and run core parity plus ROS adapter tests when authorized.
-- [ ] Build and run the RPP boundary tests when the generated RPP interfaces
-      and Capn Proto runtime use a matching ABI.
-- [ ] Enable the VehicleModel3D bridge for a concrete model only after its
-      numeric `step()` behavior is verified.
+- [x] Build and run core parity plus ROS adapter tests (ROS 2 lyrical image).
+- [x] Build and run the RPP boundary tests against generated interfaces
+      (`-DRPP_LOCALIZATION_ENABLE_PLUGIN_TESTS=ON`).
+- [x] Enable the VehicleModel3D bridge for a concrete model after its
+      numeric `step()` behavior is verified (more_dynamics `HullVessel`).
+- [x] `test_ekf_rosbag_integration.launch.py` uses the inputs its expected
+      end point was computed for, and also bounds the distance to the GPS
+      fixes in the bag (`-DRPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS=ON`).
