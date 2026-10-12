@@ -710,6 +710,13 @@ void RosFilterBase::differentiate_measurements(const rclcpp::Time & current_time
   if (rpp_filter_initialized()) {
     const double time_now = ros::to_seconds(current_time);
     const double dt = time_now - last_diff_time_;
+    if (dt <= 0.0) {
+      // Two updates can fall on the same clock time when the filter runs
+      // behind, most easily on simulated time. Dividing by that interval
+      // made the angular acceleration NaN, and with it every acceleration
+      // measurement from a sensor mounted off the origin.
+      return;
+    }
     const Eigen::VectorXd & state = rpp_filter_state();
     tf2::Vector3 new_state_twist_rot(
       state(StateMemberVroll),

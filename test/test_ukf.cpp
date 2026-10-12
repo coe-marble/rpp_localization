@@ -237,6 +237,28 @@ TEST(UkfTest, correction_leaves_states_without_uncertainty_untouched)
   EXPECT_DOUBLE_EQ(model.get_state()(StateMemberVyaw), 0.0);
 }
 
+TEST(UkfTest, unrelated_measurement_leaves_a_heading_on_the_branch_cut)
+{
+  // Heading exactly at half a turn, so the sigma points fall on both sides
+  // of the branch cut, and a measurement that has nothing to do with it.
+  ConstantAccelerationModel model(STATE_SIZE);
+  Ukf filter(model);
+  model.initialize_runtime();
+  model.set_process_noise_covariance(process_noise());
+  filter.initialize_runtime(process_noise(), false, 0.001, 0.0, 2.0);
+  Eigen::VectorXd state = Eigen::VectorXd::Zero(STATE_SIZE);
+  state(StateMemberYaw) = k_pi;
+  model.set_state(state);
+  model.set_state_covariance(diagonal_covariance(0.01));
+
+  filter.predict(0, 10'000'000);
+  filter.correct(measure({StateMemberAx, StateMemberAy}, {0.2, 0.15}, 1e-4));
+
+  const double yaw = model.get_state()(StateMemberYaw);
+  EXPECT_LT(std::abs(std::remainder(yaw - k_pi, 2.0 * k_pi)), 1e-3);
+  EXPECT_GT(model.get_state_covariance()(StateMemberYaw, StateMemberYaw), 0.0);
+}
+
 TEST(UkfTest, prediction_survives_a_slightly_indefinite_covariance)
 {
   Eigen::VectorXd state = Eigen::VectorXd::Zero(STATE_SIZE);

@@ -239,9 +239,14 @@ void Ukf::correct(const Measurement & measurement)
         update_indices[i] == StateMemberYaw)
       {
         sigma_diff(i) = angles::normalize_angle(sigma_diff(i));
-        sigma_state_diff(update_indices[i]) =
-          angles::normalize_angle(sigma_state_diff(update_indices[i]));
       }
+    }
+    // Every angle of the state difference is wrapped, not only the measured
+    // ones. A sigma point on the other side of the branch cut is otherwise a
+    // full turn away, and that turn, scaled by the sigma weights, enters the
+    // cross covariance of an angle that the measurement does not even touch.
+    for (const auto angle : {StateMemberRoll, StateMemberPitch, StateMemberYaw}) {
+      sigma_state_diff(angle) = angles::normalize_angle(sigma_state_diff(angle));
     }
 
     predicted_meas_covar.noalias() +=
