@@ -34,19 +34,34 @@
       supply model-specific process and filter tuning.
 - [ ] Restore/adapt ROS coverage after the structural merge; do not change
       InEKF in this work.
-- [x] Exclude InEKF from the EKF/UKF-only build without deleting its source.
 
-## Deferred InEKF work
+## InEKF
 
-- [ ] Design a dedicated RPP process and measurement contract for the
-      Lie-group InEKF state, tangent covariance, and IMU input.
-- [ ] Port InEKF only after that contract exists; do not force it into
-      `NavModel15` or the 15-state EKF/UKF lifecycle.
+- [x] Design a dedicated RPP process and measurement contract for the
+      Lie-group InEKF state, tangent covariance, and IMU input
+      (`InertialModel`, `InvariantFilter`).
+- [x] Port the InEKF behind that contract as a right-invariant filter with
+      IMU biases, without forcing it into `NavModel15` or the 15-state
+      EKF/UKF lifecycle (`ImuInertialModel`, `Inekf`, `inekf_node`).
+- [ ] Left-invariant error convention; the contract carries the flag but
+      only the right-invariant form is implemented.
+- [ ] Measurement history and replay of late measurements.
+- [ ] Add the gyroscope noise of the lever arm to the covariance of a body
+      velocity measured away from the IMU.
+
+## Performance
+
+- [ ] The registrator compiles plugins without optimisation, which slows
+      every filter. With a 200 Hz IMU the UKF reaches 2-5 Hz where 10 Hz is
+      asked, and the EKF holds 10 Hz with less than 3x margin.
 
 ## Verification
 
-- [ ] Build and run core parity plus ROS adapter tests when authorized.
-- [ ] Build and run the RPP boundary tests when the generated RPP interfaces
-      and Capn Proto runtime use a matching ABI.
-- [ ] Enable the VehicleModel3D bridge for a concrete model only after its
-      numeric `step()` behavior is verified.
+- [x] Build and run core parity plus ROS adapter tests (ROS 2 lyrical image).
+- [x] Build and run the RPP boundary tests against generated interfaces
+      (`-DRPP_LOCALIZATION_ENABLE_PLUGIN_TESTS=ON`).
+- [x] Enable the VehicleModel3D bridge for a concrete model after its
+      numeric `step()` behavior is verified (more_dynamics `HullVessel`).
+- [x] `test_ekf_rosbag_integration.launch.py` uses the inputs its expected
+      end point was computed for, and also bounds the distance to the GPS
+      fixes in the bag (`-DRPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS=ON`).

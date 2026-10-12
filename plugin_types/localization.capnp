@@ -115,12 +115,22 @@ struct LocalizationFilterResult15 {
 interface NavModel15 $Anot.plugin("NavModel15") {
   predict @0 (input :LocalizationModelPredictInput15)
       -> (output :LocalizationModelPredictOutput15);
+  describe @1 () -> (description :NavModelDescription15);
 }
 
 # The filter lifecycle is initialize, predict/correct, estimate, and reset.
 # `correct` may report staleMeasurement when its replay policy cannot accept
 # the timestamp. Lifecycle operations return status payloads instead of using
 # transport errors for ordinary validation failures.
+# What a caller must know about a model to feed it consistently.
+struct NavModelDescription15 {
+  # True when the model turns Control6 into an acceleration. A measured
+  # acceleration then competes with the control, so the caller disables the
+  # control on every axis whose acceleration it measures. False for a model
+  # that reads Control6 as an actuator command.
+  controlDrivesAcceleration @0 :Bool;
+}
+
 interface LocalizationFilter15 $Anot.plugin("LocalizationFilter15") {
   initialize @0 (initialEstimate :Estimate15) -> (status :LocalizationStatus);
   predict @1 (input :LocalizationPredictInput15)
@@ -129,4 +139,113 @@ interface LocalizationFilter15 $Anot.plugin("LocalizationFilter15") {
       -> (result :LocalizationFilterResult15);
   getEstimate @3 () -> (result :LocalizationFilterResult15);
   reset @4 (initialEstimate :Estimate15) -> (status :LocalizationStatus);
+  # Description of the model the filter predicts with.
+  describeModel @5 () -> (description :NavModelDescription15);
+}
+
+# ---------------------------------------------------------------------------
+# Invariant filter contract, version 1.
+#
+# An invariant filter estimates an inertial navigation state on a Lie group
+# and is driven by IMU samples: the IMU is the input of every prediction, not
+# a measurement. It does not share the State15 lifecycle above.
+# ---------------------------------------------------------------------------
+
+# Extended pose with IMU biases. `rotation` holds the 9 row-major values of
+# the rotation from body to world; `velocity` and `position` are in the world
+# frame; the biases are in the body frame. Vectors have exactly 3 values.
+#
+# `covariance` holds the 225 row-major values of the error covariance on the
+# tangent space, ordered rotation, velocity, position, gyroscope bias,
+# accelerometer bias. `rightInvariant` fixes the error convention: when true,
+# truth = exp(error) * estimate; when false, truth = estimate * exp(error).
+# A filter instance uses one convention and rejects states in the other.
+struct InertialState {
+  rotation @0 :List(Float64);
+  velocity @1 :List(Float64);
+  position @2 :List(Float64);
+  gyroBias @3 :List(Float64);
+  accelBias @4 :List(Float64);
+  covariance @5 :List(Float64);
+  rightInvariant @6 :Bool;
+}
+
+# One IMU reading in the body frame: angular velocity in radians/s and
+# specific force in metres/s^2, each with exactly 3 values. A level IMU at
+# rest reads +gravity on the axis that points up.
+struct ImuSample {
+  angularVelocity @0 :List(Float64);
+  specificForce @1 :List(Float64);
+}
+
+struct InertialModelPredictInput {
+  state @0 :InertialState;
+  imu @1 :ImuSample;
+  referenceTimeNs @2 :Int64;
+  deltaNs @3 :Int64;
+}
+
+struct InertialModelPredictOutput {
+  state @0 :InertialState;
+  status @1 :LocalizationStatus;
+}
+
+# Propagates an inertial state and its covariance with one IMU sample held
+# over `deltaNs`. A model is stateless: everything it needs is in the input.
+interface InertialModel $Anot.plugin("InertialModel") {
+  predict @0 (input :InertialModelPredictInput)
+      -> (output :InertialModelPredictOutput);
+}
+
+# One measurement of a quantity the filter knows how to relate to its state.
+# `kind` is stable: 0=position, 1=bodyVelocity, 2=attitude.
+#   position:     3 values, world position of the sensor, world-frame covariance
+#   bodyVelocity: 3 values, velocity of the sensor in the body frame
+#   attitude:     9 row-major values, rotation from body to world; the
+#                 covariance is of the small rotation error in the body frame
+# `covariance` has 9 row-major values. `leverArm` is the position of the
+# sensor in the body frame, 3 values, and is ignored for an attitude.
+# `mahalanobisThreshold` is positive infinity when rejection is disabled.
+struct InvariantMeasurement {
+  kind @0 :UInt16;
+  values @1 :List(Float64);
+  covariance @2 :List(Float64);
+  leverArm @3 :List(Float64);
+  referenceTimeNs @4 :Int64;
+  mahalanobisThreshold @5 :Float64;
+  sourceName @6 :Text;
+}
+
+# `angularVelocity` is the last IMU rate with the gyroscope bias removed.
+struct InertialEstimate {
+  state @0 :InertialState;
+  angularVelocity @1 :List(Float64);
+  referenceTimeNs @2 :Int64;
+}
+
+struct InvariantPredictInput {
+  imu @0 :ImuSample;
+  referenceTimeNs @1 :Int64;
+  deltaNs @2 :Int64;
+}
+
+# `accepted` is false when the Mahalanobis gate rejected a measurement.
+struct InvariantFilterResult {
+  estimate @0 :InertialEstimate;
+  status @1 :LocalizationStatus;
+  accepted @2 :Bool;
+}
+
+# The lifecycle is initialize, predict/correct, getEstimate, and reset.
+# `predict` advances the estimate to `referenceTimeNs` and must be called
+# with the time advancing by exactly `deltaNs`. `correct` applies a
+# measurement to the current estimate; version 1 keeps no history, so a
+# measurement stamped after the estimate is rejected with invalidTime and an
+# older one is applied as if taken now.
+interface InvariantFilter $Anot.plugin("InvariantFilter") {
+  initialize @0 (initialEstimate :InertialEstimate) -> (status :LocalizationStatus);
+  predict @1 (input :InvariantPredictInput) -> (result :InvariantFilterResult);
+  correct @2 (measurement :InvariantMeasurement) -> (result :InvariantFilterResult);
+  getEstimate @3 () -> (result :InvariantFilterResult);
+  reset @4 (initialEstimate :InertialEstimate) -> (status :LocalizationStatus);
 }

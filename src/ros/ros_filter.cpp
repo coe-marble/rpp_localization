@@ -221,7 +221,7 @@ void RosFilter::load_params()
   std::vector<CallbackData> acc_callback_data_v;
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&, const CallbackData&)>
-  on_registered_odom = [this](const std::string& topic_name, const std::string& topic, int queue_size,
+  on_registered_odom = [this](const std::string& topic, const std::string& topic_name, int queue_size,
       const CallbackData& pose_callback_data, const CallbackData& twist_callback_data)
   {
     std::function<void(const std::shared_ptr<nav_msgs::msg::Odometry>)>
@@ -295,7 +295,7 @@ void RosFilter::load_params()
 
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&, const CallbackData&, const CallbackData&)>
-  on_registered_imu = [this](const std::string& topic_name, const std::string& topic, int queue_size,
+  on_registered_imu = [this](const std::string& topic, const std::string& topic_name, int queue_size,
       const CallbackData& pose_callback_data, const CallbackData& twist_callback_data, const CallbackData& acc_callback_data)
   {
     std::function<void(const std::shared_ptr<sensor_msgs::msg::Imu>)>
@@ -314,12 +314,14 @@ void RosFilter::load_params()
   auto control_update_vector = this->rpp_filter_control_update_vector();
   ros_filter_utilities::handle_imu_params(*shared_this,
     &this->_debug_stream, control_update_vector,
+    this->rpp_model_control_drives_acceleration(),
     this->remove_gravitational_acceleration_,
     pose_callback_data_v,
     twist_callback_data_v,
     acc_callback_data_v,
     on_registered_imu
   );
+  this->set_rpp_filter_control_update_vector(control_update_vector);
 
   this->count_var_counts(pose_callback_data_v, twist_callback_data_v, acc_callback_data_v);
 
@@ -461,7 +463,7 @@ void RosFilter::periodic_update()
           RCLCPP_ERROR_STREAM_SKIPFIRST_THROTTLE(
             this->get_logger(),
             *this->get_clock(),
-            5.0,
+            5000.0,
             "Could not obtain transform from " << this->odom_frame_id_ << "->" << this->base_link_frame_id_);
         }
       } else {

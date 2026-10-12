@@ -4,11 +4,13 @@
  */
 #include "rpp_localization/filters/unscented_kalman_filter.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
 #include "angles/angles.h"
 #include "Eigen/Cholesky"
+#include "Eigen/Eigenvalues"
 #include "Eigen/Dense"
 #include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
@@ -91,7 +93,12 @@ void Ukf::correct(const Measurement & measurement)
   // time stamps). In that event, the sigma points need to be updated to reflect
   // the current state. Throughout prediction and correction, we attempt to
   // maximize efficiency in Eigen.
-  if (!uncorrected_) {
+  const bool sigma_points_are_current =
+    uncorrected_ &&
+    sigma_points_state_.size() == state.size() &&
+    sigma_points_state_ == state &&
+    sigma_points_covariance_ == state_covariance;
+  if (!sigma_points_are_current) {
     generate_sigma_points(state, state_covariance);
   }
 
@@ -192,43 +199,30 @@ void Ukf::correct(const Measurement & measurement)
       "\nState-to-measurement subset is:\n" <<
       state_to_measurement_subset << "\n");
 
-  double roll_sum_x {};
-  double roll_sum_y {};
-  double pitch_sum_x {};
-  double pitch_sum_y {};
-  double yaw_sum_x {};
-  double yaw_sum_y {};
-
   // (1) Generate sigma points, use them to generate a predicted measurement
   for (size_t sigma_ind = 0; sigma_ind < sigma_points_.size(); ++sigma_ind) {
     sigma_point_measurements[sigma_ind] =
       state_to_measurement_subset * sigma_points_[sigma_ind];
     predicted_measurement.noalias() +=
       state_weights_[sigma_ind] * sigma_point_measurements[sigma_ind];
+  }
 
-    // Euler angle averaging requires special care
-    for (size_t i = 0; i < update_size; ++i) {
-      if (update_indices[i] == StateMemberRoll) {
-        roll_sum_x += state_weights_[sigma_ind] * ::cos(sigma_point_measurements[sigma_ind](i));
-        roll_sum_y += state_weights_[sigma_ind] * ::sin(sigma_point_measurements[sigma_ind](i));
-      } else if (update_indices[i] == StateMemberPitch) {
-        pitch_sum_x += state_weights_[sigma_ind] * ::cos(sigma_point_measurements[sigma_ind](i));
-        pitch_sum_y += state_weights_[sigma_ind] * ::sin(sigma_point_measurements[sigma_ind](i));
-      } else if (update_indices[i] == StateMemberYaw) {
-        yaw_sum_x += state_weights_[sigma_ind] * ::cos(sigma_point_measurements[sigma_ind](i));
-        yaw_sum_y += state_weights_[sigma_ind] * ::sin(sigma_point_measurements[sigma_ind](i));
+  // Euler angles are averaged as wrapped offsets from the central sigma
+  // point. The weighted sum of sines and cosines used before turns the mean
+  // by half a turn once the angle variance passes 2 rad^2, because the
+  // central weight is large and negative.
+  for (size_t i = 0; i < update_size; ++i) {
+    if (update_indices[i] == StateMemberRoll ||
+      update_indices[i] == StateMemberPitch ||
+      update_indices[i] == StateMemberYaw)
+    {
+      const double centre = sigma_point_measurements[0](i);
+      double offset = 0.0;
+      for (size_t sigma_ind = 1; sigma_ind < sigma_points_.size(); ++sigma_ind) {
+        offset += state_weights_[sigma_ind] *
+          angles::normalize_angle(sigma_point_measurements[sigma_ind](i) - centre);
       }
-    }
-
-    // Wrap angles in the innovation
-    for (size_t i = 0; i < update_size; ++i) {
-      if (update_indices[i] == StateMemberRoll) {
-        predicted_measurement(i) = ::atan2(roll_sum_y, roll_sum_x);
-      } else if (update_indices[i] == StateMemberPitch) {
-        predicted_measurement(i) = ::atan2(pitch_sum_y, pitch_sum_x);
-      } else if (update_indices[i] == StateMemberYaw) {
-        predicted_measurement(i) = ::atan2(yaw_sum_y, yaw_sum_x);
-      }
+      predicted_measurement(i) = angles::normalize_angle(centre + offset);
     }
   }
 
@@ -245,8 +239,14 @@ void Ukf::correct(const Measurement & measurement)
         update_indices[i] == StateMemberYaw)
       {
         sigma_diff(i) = angles::normalize_angle(sigma_diff(i));
-        sigma_state_diff(i) = angles::normalize_angle(sigma_state_diff(i));
       }
+    }
+    // Every angle of the state difference is wrapped, not only the measured
+    // ones. A sigma point on the other side of the branch cut is otherwise a
+    // full turn away, and that turn, scaled by the sigma weights, enters the
+    // cross covariance of an angle that the measurement does not even touch.
+    for (const auto angle : {StateMemberRoll, StateMemberPitch, StateMemberYaw}) {
+      sigma_state_diff(angle) = angles::normalize_angle(sigma_state_diff(angle));
     }
 
     predicted_meas_covar.noalias() +=
@@ -282,9 +282,11 @@ void Ukf::correct(const Measurement & measurement)
   {
     state.noalias() += kalman_gain_subset * innovation_subset;
 
-    // (6) Compute the new estimate error covariance P = P - (K * P_zz * K')
+    // (6) Compute the new estimate error covariance P = P - K * S * K', where
+    // S = P_zz + R is the innovation covariance the gain was computed with.
     state_covariance.noalias() -=
-      (kalman_gain_subset * predicted_meas_covar *
+      (kalman_gain_subset *
+      (predicted_meas_covar + measurement_covariance_subset) *
       kalman_gain_subset.transpose());
 
     filter_utilities::wrap_state_angles(state);
@@ -321,33 +323,25 @@ void Ukf::predict(
 
   Eigen::MatrixXd& state_covariance = _model_as_base->get_state_covariance_unsafe();
   generate_sigma_points(state, state_covariance);
-  double roll_sum_x {};
-  double roll_sum_y {};
-  double pitch_sum_x {};
-  double pitch_sum_y {};
-  double yaw_sum_x {};
-  double yaw_sum_y {};
-
   // Sum the weighted sigma points to generate a new state prediction
   state.setZero();
   for (size_t sigma_ind = 0; sigma_ind < sigma_points_.size(); ++sigma_ind) {
     // Apply the state transition function to this sigma point
     project_sigma_point(reference_time, sigma_points_[sigma_ind], delta);
     state.noalias() += state_weights_[sigma_ind] * sigma_points_[sigma_ind];
-
-    // Euler angle averaging requires special care
-    roll_sum_x += state_weights_[sigma_ind] * ::cos(sigma_points_[sigma_ind](StateMemberRoll));
-    roll_sum_y += state_weights_[sigma_ind] * ::sin(sigma_points_[sigma_ind](StateMemberRoll));
-    pitch_sum_x += state_weights_[sigma_ind] * ::cos(sigma_points_[sigma_ind](StateMemberPitch));
-    pitch_sum_y += state_weights_[sigma_ind] * ::sin(sigma_points_[sigma_ind](StateMemberPitch));
-    yaw_sum_x += state_weights_[sigma_ind] * ::cos(sigma_points_[sigma_ind](StateMemberYaw));
-    yaw_sum_y += state_weights_[sigma_ind] * ::sin(sigma_points_[sigma_ind](StateMemberYaw));
   }
 
-  // Recover average Euler angles
-  state(StateMemberRoll) = ::atan2(roll_sum_y, roll_sum_x);
-  state(StateMemberPitch) = ::atan2(pitch_sum_y, pitch_sum_x);
-  state(StateMemberYaw) = ::atan2(yaw_sum_y, yaw_sum_x);
+  // Euler angles are averaged as wrapped offsets from the central sigma
+  // point; see the note in correct().
+  for (const auto angle : {StateMemberRoll, StateMemberPitch, StateMemberYaw}) {
+    const double centre = sigma_points_[0](angle);
+    double offset = 0.0;
+    for (size_t sigma_ind = 1; sigma_ind < sigma_points_.size(); ++sigma_ind) {
+      offset += state_weights_[sigma_ind] *
+        angles::normalize_angle(sigma_points_[sigma_ind](angle) - centre);
+    }
+    state(angle) = angles::normalize_angle(centre + offset);
+  }
 
   // Now use the sigma points and the predicted state to compute a predicted covariance
   state_covariance.setZero();
@@ -378,6 +372,8 @@ void Ukf::predict(
 
   // Mark that we can keep these sigma points
   uncorrected_ = true;
+  sigma_points_state_ = state;
+  sigma_points_covariance_ = state_covariance;
   _model_as_base->set_state(std::move(state));
   FB_DEBUG(
     "Predicted state is:\n" << state <<
@@ -390,8 +386,22 @@ void Ukf::generate_sigma_points(const Eigen::VectorXd& state, const Eigen::Matri
 
   // Take the square root of a small fraction of the state_covariance using LL'
   // decomposition
-  weighted_covar_sqrt_ =
-    ((static_cast<double>(STATE_SIZE) + lambda_) * state_covariance).llt().matrixL();
+  const Eigen::MatrixXd scaled_covariance =
+    (static_cast<double>(STATE_SIZE) + lambda_) * 0.5 *
+    (state_covariance + state_covariance.transpose());
+  const Eigen::LLT<Eigen::MatrixXd> cholesky(scaled_covariance);
+  weighted_covar_sqrt_ = cholesky.matrixL();
+  if (cholesky.info() != Eigen::Success || !weighted_covar_sqrt_.allFinite()) {
+    // Rounding in P - K S K' can leave the covariance slightly indefinite,
+    // typically on a state that nothing measures. The factorization then
+    // fails and would fill the sigma points with NaN, so the square root is
+    // taken from the eigenvalues with the negative ones set to zero. Zero
+    // and not a small positive floor: a state without uncertainty must get
+    // no spread, or the next correction subtracts variance it never had.
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(scaled_covariance);
+    const Eigen::VectorXd roots = solver.eigenvalues().cwiseMax(0.0).cwiseSqrt();
+    weighted_covar_sqrt_ = solver.eigenvectors() * roots.asDiagonal();
+  }
 
   // Compute sigma points
 

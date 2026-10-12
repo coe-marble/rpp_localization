@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -22,6 +23,11 @@
 
 // Shared RPP lifecycle adapter. Derived plugins choose Ekf or Ukf; this class
 // owns the model adapter, runtime filter, payload validation, and replay state.
+//
+// A measurement older than the estimate is inserted into a sliding window of
+// recent predictions and corrections, which is then replayed from the state
+// at the start of the window. Events older than the window are dropped, so
+// the cost of a late measurement is bounded.
 class Filter15PluginBase : public rpp_localization::LocalizationFilter15
 {
 public:
@@ -158,6 +164,8 @@ public:
 
     history_.push_back(HistoryEvent::prediction(prediction));
     reference_time_ = prediction.reference_time;
+    record_estimate(history_.back());
+    trim_history();
     write_current_estimate(result);
     set_result_status(result, k_ok, "");
     return result;
@@ -187,22 +195,23 @@ public:
       set_result_status(result, k_invalid_time, "measurement follows the current estimate; predict first");
       return result;
     }
-    if (core_measurement.time_ < initial_reference_time_)
-    {
-      write_current_estimate(result);
-      set_result_status(result, k_stale_measurement,
-        "measurement precedes the retained initialization state");
-      return result;
-    }
+    // A measurement older than the retained window is applied at its start.
+    core_measurement.time_ = std::max(core_measurement.time_, initial_reference_time_);
 
     if (core_measurement.time_ < reference_time_)
     {
       if (!replay_stale_measurement(core_measurement))
       {
-        write_current_estimate(result);
-        set_result_status(result, k_stale_measurement,
-          "measurement could not be replayed through the retained prediction history");
-        return result;
+        // Without a usable history the measurement corrects the current
+        // estimate, as a filter without replay would do.
+        core_measurement.time_ = reference_time_;
+        if (!apply_current_measurement(core_measurement))
+        {
+          write_current_estimate(result);
+          set_result_status(result, k_numerical_failure,
+            "correction produced an invalid estimate");
+          return result;
+        }
       }
     }
     else if (!apply_current_measurement(core_measurement))
@@ -215,6 +224,15 @@ public:
     write_current_estimate(result);
     set_result_status(result, k_ok, "");
     return result;
+  }
+
+  NavModelDescription15::Const describeModel() override
+  {
+    if (!model_component_)
+    {
+      throw std::logic_error("NavModel15 component is not initialized");
+    }
+    return model_component_->describe();
   }
 
   LocalizationFilterResult15::Const getEstimate() override
@@ -306,7 +324,15 @@ private:
     rpp_localization::TimestampNs time;
     PredictionEvent prediction_input;
     rpp_localization::Measurement measurement_input;
+    // Estimate after this event, recorded when it is applied or replayed.
+    rpp_localization::StateVector state_after;
+    rpp_localization::CovarianceMatrix covariance_after;
+    rpp_localization::TimestampNs reference_time_after{0};
   };
+
+  // Length of the replay window. Late measurements are rarely older than a
+  // few sensor periods.
+  static constexpr rpp_localization::DurationNs k_history_window = 1'000'000'000;
 
   static constexpr std::uint16_t k_ok = 0;
   static constexpr std::uint16_t k_invalid_payload = 1;
@@ -484,7 +510,30 @@ private:
     }
 
     history_.push_back(HistoryEvent::measurement(measurement));
+    record_estimate(history_.back());
     return true;
+  }
+
+  // Remembers the estimate an event leads to, so the window can start there.
+  void record_estimate(HistoryEvent& event) const
+  {
+    event.state_after = model_runtime_->get_state();
+    event.covariance_after = model_runtime_->get_state_covariance();
+    event.reference_time_after = reference_time_;
+  }
+
+  // Drops events older than the window and moves its start to the estimate
+  // the last dropped event led to.
+  void trim_history()
+  {
+    while (history_.size() > 1 &&
+      history_.front().reference_time_after + k_history_window < reference_time_)
+    {
+      initial_state_ = std::move(history_.front().state_after);
+      initial_covariance_ = std::move(history_.front().covariance_after);
+      initial_reference_time_ = history_.front().reference_time_after;
+      history_.pop_front();
+    }
   }
 
   void apply_prediction(const PredictionEvent& prediction)
@@ -513,8 +562,21 @@ private:
 
     try
     {
-      model_runtime_->set_state(initial_state_);
-      model_runtime_->set_state_covariance(initial_covariance_);
+      // Everything before the inserted measurement is unchanged, so the
+      // replay starts from the estimate the preceding event led to.
+      if (insertion_index == 0)
+      {
+        model_runtime_->set_state(initial_state_);
+        model_runtime_->set_state_covariance(initial_covariance_);
+        reference_time_ = initial_reference_time_;
+      }
+      else
+      {
+        const auto& preceding = history_[insertion_index - 1];
+        model_runtime_->set_state(preceding.state_after);
+        model_runtime_->set_state_covariance(preceding.covariance_after);
+        reference_time_ = preceding.reference_time_after;
+      }
       model_runtime_->set_control(rpp_localization::plugins::detail::ModelControl{});
       auto replay_filter = create_filter(*model_runtime_);
       if (!replay_filter)
@@ -522,10 +584,9 @@ private:
         throw std::runtime_error("filter factory returned no runtime filter during replay");
       }
 
-      reference_time_ = initial_reference_time_;
-      for (std::size_t index = 0; index < history_.size(); ++index)
+      for (std::size_t index = insertion_index; index < history_.size(); ++index)
       {
-        const auto& event = history_[index];
+        auto& event = history_[index];
         if (event.kind == HistoryEvent::Kind::k_prediction)
         {
           if (event.time < reference_time_)
@@ -560,6 +621,7 @@ private:
         {
           throw std::runtime_error("replay produced an invalid estimate");
         }
+        record_estimate(event);
       }
 
       filter_ = std::move(replay_filter);
@@ -686,7 +748,7 @@ private:
   std::unique_ptr<rpp_localization::FilterBase> filter_;
   rpp_localization::StateVector initial_state_;
   rpp_localization::CovarianceMatrix initial_covariance_;
-  std::vector<HistoryEvent> history_;
+  std::deque<HistoryEvent> history_;
   rpp_localization::TimestampNs reference_time_{0};
   rpp_localization::TimestampNs initial_reference_time_{0};
   bool component_ready_{false};

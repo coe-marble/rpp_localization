@@ -79,6 +79,18 @@ private:
     process_noise_covariance_.setZero(k_state_size, k_state_size);
     if (covariance_values.empty())
     {
+      // The UKF adds the process noise itself instead of taking it from the
+      // model, so without a configured value it uses the same defaults as
+      // the constant-acceleration model. Zero noise would make the filter
+      // ignore its measurements.
+      const double defaults[k_state_size] = {
+        0.05, 0.05, 0.06, 0.03, 0.03, 0.06, 0.025, 0.025, 0.04,
+        0.01, 0.01, 0.02, 0.01, 0.01, 0.015};
+      for (std::size_t index = 0; index < k_state_size; ++index)
+      {
+        process_noise_covariance_(static_cast<Eigen::Index>(index),
+          static_cast<Eigen::Index>(index)) = defaults[index];
+      }
       return;
     }
     if (covariance_values.size() != k_covariance_size)

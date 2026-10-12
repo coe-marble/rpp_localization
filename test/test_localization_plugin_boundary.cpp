@@ -57,6 +57,13 @@ public:
 
   void initialize(const rpp::ComponentContext&) override {}
 
+  NavModelDescription15::Const describe() override
+  {
+    NavModelDescription15 description;
+    description.controlDrivesAcceleration() = true;
+    return description;
+  }
+
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
     reference_time_ = input.referenceTimeNs();
@@ -229,6 +236,113 @@ TEST(NavModel15Adapter, RejectsModelStatusAndInvalidCovariance)
   {
     EXPECT_EQ(error.code(), 9);
   }
+}
+
+// Keeps the state and grows every variance with the elapsed time, so the
+// order in which predictions and corrections are applied matters.
+class RandomWalkNavModel15 final : public rpp_localization::NavModel15
+{
+public:
+  void initialize(const rpp::ComponentContext&) override {}
+
+  NavModelDescription15::Const describe() override
+  {
+    NavModelDescription15 description;
+    description.controlDrivesAcceleration() = false;
+    return description;
+  }
+
+  LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
+  {
+    LocalizationModelPredictOutput15 output;
+    // Each list is filled right after it is sized: sizing another list of
+    // the same payload invalidates the handle of the previous one.
+    const auto input_state = input.state().values();
+    auto state = output.state().values();
+    state.resize(k_state_size);
+    for (std::size_t index = 0; index < k_state_size; ++index)
+    {
+      const double value = input_state[index];
+      state[index] = value;
+    }
+
+    const auto input_covariance = input.covariance().values();
+    auto covariance = output.covariance().values();
+    covariance.resize(k_covariance_size);
+    const double growth = static_cast<double>(input.deltaNs()) * 1e-9;
+    for (std::size_t row = 0; row < k_state_size; ++row)
+    {
+      for (std::size_t column = 0; column < k_state_size; ++column)
+      {
+        const std::size_t index = row * k_state_size + column;
+        const double variance = input_covariance[index];
+        covariance[index] = variance + (row == column ? growth : 0.0);
+      }
+    }
+    output.status().code() = 0;
+    return output;
+  }
+};
+
+rpp_localization::LocalizationFilter15::LocalizationFilterResult15::Const predict_to(
+  BoundaryEkf15& filter,
+  const rpp_localization::TimestampNs reference_time,
+  const rpp_localization::DurationNs delta)
+{
+  rpp_localization::LocalizationFilter15::LocalizationPredictInput15 prediction;
+  prediction.referenceTimeNs() = reference_time;
+  prediction.deltaNs() = delta;
+  prediction.control().present() = false;
+  return filter.predict(std::move(prediction));
+}
+
+TEST(LocalizationFilter15PluginBoundary, LateMeasurementMatchesInOrderProcessing)
+{
+  const rpp_localization::DurationNs step = 100'000'000;
+
+  BoundaryEkf15 in_order;
+  in_order.initialize_with(std::make_shared<RandomWalkNavModel15>());
+  ASSERT_EQ(in_order.initialize(make_estimate(0)).code(), 0);
+  ASSERT_EQ(predict_to(in_order, step, step).status().code(), 0);
+  ASSERT_EQ(in_order.correct(make_measurement(step, 2.0, 0.5)).status().code(), 0);
+  ASSERT_EQ(predict_to(in_order, 2 * step, step).status().code(), 0);
+  const auto expected = predict_to(in_order, 3 * step, step);
+
+  BoundaryEkf15 late;
+  late.initialize_with(std::make_shared<RandomWalkNavModel15>());
+  ASSERT_EQ(late.initialize(make_estimate(0)).code(), 0);
+  ASSERT_EQ(predict_to(late, step, step).status().code(), 0);
+  ASSERT_EQ(predict_to(late, 2 * step, step).status().code(), 0);
+  ASSERT_EQ(predict_to(late, 3 * step, step).status().code(), 0);
+  const auto replayed = late.correct(make_measurement(step, 2.0, 0.5));
+
+  ASSERT_EQ(replayed.status().code(), 0) << std::string(replayed.status().message());
+  EXPECT_EQ(replayed.estimate().referenceTimeNs(), 3 * step);
+  EXPECT_NEAR(
+    replayed.estimate().state().values()[0], expected.estimate().state().values()[0], 1e-12);
+  EXPECT_NEAR(
+    replayed.estimate().covariance().values()[0],
+    expected.estimate().covariance().values()[0], 1e-12);
+  EXPECT_GT(replayed.estimate().state().values()[0], 0.5);
+}
+
+TEST(LocalizationFilter15PluginBoundary, MeasurementOlderThanTheWindowStillCorrects)
+{
+  const rpp_localization::DurationNs step = 500'000'000;
+  BoundaryEkf15 filter;
+  filter.initialize_with(std::make_shared<RandomWalkNavModel15>());
+  ASSERT_EQ(filter.initialize(make_estimate(0)).code(), 0);
+  for (int index = 1; index <= 10; ++index)
+  {
+    ASSERT_EQ(predict_to(filter, index * step, step).status().code(), 0);
+  }
+
+  const auto corrected = filter.correct(make_measurement(1, 2.0, 0.5));
+
+  EXPECT_EQ(corrected.status().code(), 0) << std::string(corrected.status().message());
+  EXPECT_EQ(corrected.estimate().referenceTimeNs(), 10 * step);
+  EXPECT_GT(corrected.estimate().state().values()[0], 0.5);
+  EXPECT_LT(corrected.estimate().state().values()[0], 2.0);
 }
 
 TEST(LocalizationFilter15PluginBoundary, PreservesStaleTimeAndCovarianceNormalization)

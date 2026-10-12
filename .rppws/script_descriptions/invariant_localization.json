@@ -1,0 +1,23 @@
+{
+  "ScriptName": "invariant_localization",
+  "ScriptLibrary": "rpp_localization",
+  "ScriptPath": "include/rpp_localization/ros/invariant_localization_script.hpp",
+  "Language": "cpp",
+  "Spec": {
+    "filter": "rpp_localization::InvariantFilter"
+  },
+  "Configurations": {
+    "inekf": {
+      "Description": "Right-invariant EKF driven by an IMU",
+      "Components": {
+        "filter": [
+          {
+            "Id": "33333333-3333-4333-8333-333333333333",
+            "PluginName": "rpp_localization::Inekf"
+          }
+        ]
+      }
+    }
+  },
+  "ActiveConfiguration": "inekf"
+}

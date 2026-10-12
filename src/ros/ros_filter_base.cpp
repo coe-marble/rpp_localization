@@ -84,6 +84,8 @@ RosFilterBase::RosFilterBase(
   rpp_sensor_timeout_(rclcpp::Duration::from_nanoseconds(0))
 {
   default_configuration_ = std::move(default_configuration);
+  _latest_control.stamp = 0;
+  _latest_control.control.setZero(TWIST_SIZE);
 
   this->_tf_buffer = std::make_unique<TfBufferWrapper>(this->get_clock(), online);
   state_variable_names_.push_back("X");
@@ -708,6 +710,13 @@ void RosFilterBase::differentiate_measurements(const rclcpp::Time & current_time
   if (rpp_filter_initialized()) {
     const double time_now = ros::to_seconds(current_time);
     const double dt = time_now - last_diff_time_;
+    if (dt <= 0.0) {
+      // Two updates can fall on the same clock time when the filter runs
+      // behind, most easily on simulated time. Dividing by that interval
+      // made the angular acceleration NaN, and with it every acceleration
+      // measurement from a sensor mounted off the origin.
+      return;
+    }
     const Eigen::VectorXd & state = rpp_filter_state();
     tf2::Vector3 new_state_twist_rot(
       state(StateMemberVroll),
@@ -2563,10 +2572,14 @@ void RosFilterBase::initialize_rpp_filter()
   const auto configuration = declare_parameter<std::string>(
     "configuration", default_configuration_);
   const auto script = parse_script_reference(script_reference);
+  // The composition is read from the script's own package unless another
+  // workspace that links the script supplies it.
+  const auto workspace = declare_parameter<std::string>("rpp_workspace", "");
 
   rpp::RppDataManager data_manager(
     rpp::RPP_HOME,
-    ament_index_cpp::get_package_share_path(script.library).string());
+    workspace.empty() ?
+    ament_index_cpp::get_package_share_path(script.library).string() : workspace);
   rpp::ComponentContextBuilder context_builder(data_manager);
   const std::optional<std::string> selected_configuration = configuration.empty() ?
     std::nullopt : std::optional<std::string>(configuration);
@@ -2739,6 +2752,23 @@ const ControlCommand & RosFilterBase::rpp_filter_control() const noexcept
 const std::vector<bool> & RosFilterBase::rpp_filter_control_update_vector() const noexcept
 {
   return rpp_control_update_vector_;
+}
+
+void RosFilterBase::set_rpp_filter_control_update_vector(
+  const std::vector<bool> & control_update_vector)
+{
+  if (control_update_vector.size() != static_cast<std::size_t>(TWIST_SIZE)) {
+    throw std::invalid_argument("control update vector must contain six values");
+  }
+  rpp_control_update_vector_ = control_update_vector;
+}
+
+bool RosFilterBase::rpp_model_control_drives_acceleration() const
+{
+  if (!rpp_filter_) {
+    throw std::logic_error("RPP filter is not initialized");
+  }
+  return rpp_filter_->describeModel().controlDrivesAcceleration();
 }
 
 TimestampNs RosFilterBase::rpp_filter_last_measurement_time() const noexcept

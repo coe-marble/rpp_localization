@@ -114,6 +114,15 @@ protected:
    * carrying out multiple corrections
    */
   bool uncorrected_;
+
+  /**
+   * @brief  The estimate the retained sigma points were predicted to. They
+   * are reused only while the model still holds this estimate, so a state set
+   * from outside (initialization, reset, replay) regenerates them.
+   */
+  Eigen::VectorXd sigma_points_state_;
+  Eigen::MatrixXd sigma_points_covariance_;
+
   bool use_dynamic_process_noise_covariance_;
 
   Eigen::MatrixXd process_noise_covariance_;

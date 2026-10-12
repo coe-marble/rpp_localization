@@ -74,6 +74,14 @@ public:
     ready_ = true;
   }
 
+  NavModelDescription15::Const describe() override
+  {
+    // Control is a target velocity that the model turns into an acceleration.
+    NavModelDescription15 description;
+    description.controlDrivesAcceleration() = true;
+    return description;
+  }
+
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
     LocalizationModelPredictOutput15 output;

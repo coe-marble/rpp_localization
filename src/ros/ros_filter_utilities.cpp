@@ -481,6 +481,7 @@ void handle_twist_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
 void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
   std::vector<bool>& control_update_vector,
+  const bool control_drives_acceleration,
   std::map<std::string, bool>& remove_gravitational_acceleration,
   std::vector<CallbackData>& pose_callback_data_v,
   std::vector<CallbackData>& twist_callback_data_v,
@@ -628,9 +629,10 @@ void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
 
 
 
-      // Check if we're using control input for any of the acceleration
-      // variables; turn off if so
-      if (control_update_vector[ControlMemberVx] &&
+      // A control that the model turns into an acceleration competes with a
+      // measured acceleration, so that control axis is turned off.
+      if (control_drives_acceleration &&
+        control_update_vector[ControlMemberVx] &&
         static_cast<bool>(accel_update_vec[StateMemberAx]))
       {
         RCLCPP_ERROR_STREAM(
@@ -638,7 +640,8 @@ void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
           "X acceleration is being measured from IMU; X velocity control input is disabled");
         control_update_vector[ControlMemberVx] = 0;
       }
-      if (control_update_vector[ControlMemberVy] &&
+      if (control_drives_acceleration &&
+        control_update_vector[ControlMemberVy] &&
         static_cast<bool>(accel_update_vec[StateMemberAy]))
       {
         RCLCPP_ERROR_STREAM(
@@ -646,7 +649,8 @@ void handle_imu_params(rclcpp::Node& node, std::ofstream* debug_stream,
           "Y acceleration is being measured from IMU; Y velocity control input is disabled");
         control_update_vector[ControlMemberVy] = 0;
       }
-      if (control_update_vector[ControlMemberVz] &&
+      if (control_drives_acceleration &&
+        control_update_vector[ControlMemberVz] &&
         static_cast<bool>(accel_update_vec[StateMemberAz]))
       {
         RCLCPP_ERROR_STREAM(
