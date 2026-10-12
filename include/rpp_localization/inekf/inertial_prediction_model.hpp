@@ -2,6 +2,7 @@
 #define RPP_LOCALIZATION__INEKF__INERTIAL_PREDICTION_MODEL_HPP_
 
 #include "Eigen/Dense"
+#include "Eigen/Geometry"
 #include "rpp_localization/core/types.hpp"
 #include "rpp_localization/inekf/se3.hpp"
 
@@ -23,6 +24,16 @@ inline constexpr int k_inertial_position = 6;
 inline constexpr int k_inertial_gyro_bias = 9;
 inline constexpr int k_inertial_accel_bias = 12;
 inline constexpr int k_inertial_tangent_size = 15;
+
+/// Removes the rounding drift that repeated products leave in the rotation,
+/// which would otherwise stop being orthonormal over a long run.
+inline void normalize_rotation(InertialLieState& state)
+{
+  InertialLieState::MatrixState matrix = state();
+  const Eigen::Matrix3d rotation = matrix.block<3, 3>(0, 0);
+  matrix.block<3, 3>(0, 0) = Eigen::Quaterniond(rotation).normalized().toRotationMatrix();
+  state.setMat(matrix);
+}
 
 /// One IMU sample that drives a prediction over `delta`.
 struct InertialPredictionInput

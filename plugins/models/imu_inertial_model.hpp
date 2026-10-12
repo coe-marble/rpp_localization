@@ -29,7 +29,9 @@ public:
     ParameterDescription::create<std::vector<double>>(
       "gyro_noise", std::vector<double>(3, 1e-3)),
     ParameterDescription::create<std::vector<double>>(
-      "accel_noise", std::vector<double>(3, 1e-2)),
+      "accel_noise", std::vector<double>(3, 1e-1)),
+    ParameterDescription::create<std::vector<double>>(
+      "position_noise", std::vector<double>(3, 5e-2)),
     ParameterDescription::create<std::vector<double>>(
       "gyro_bias_noise", std::vector<double>(3, 1e-5)),
     ParameterDescription::create<std::vector<double>>(
@@ -47,6 +49,7 @@ public:
     rpp_localization::InEKF::InertialProcessNoise noise;
     noise.gyro = read_axes(context, "gyro_noise");
     noise.accel = read_axes(context, "accel_noise");
+    noise.position = read_axes(context, "position_noise");
     noise.gyro_bias = read_axes(context, "gyro_bias_noise");
     noise.accel_bias = read_axes(context, "accel_bias_noise");
     process_->set_noise(noise);

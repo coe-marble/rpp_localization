@@ -1,5 +1,6 @@
 #include "rpp_localization/inekf/invariant_ekf.hpp"
 
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -47,10 +48,16 @@ bool InvariantEkf::correct_position(
   require_covariance(covariance);
   const Eigen::Vector3d predicted = state_[1] + state_.R()() * lever_arm;
 
+  std::array<bool, 3> measured{};
+  for (int axis = 0; axis < 3; ++axis) {
+    measured[static_cast<std::size_t>(axis)] =
+      covariance(axis, axis) < k_unmeasured_axis_variance;
+  }
+
   Jacobian jacobian = Jacobian::Zero();
   jacobian.block<3, 3>(0, k_inertial_rotation) = -SO3<>::wedge(predicted);
   jacobian.block<3, 3>(0, k_inertial_position) = Eigen::Matrix3d::Identity();
-  return correct(position - predicted, jacobian, covariance, mahalanobis_threshold);
+  return correct(position - predicted, jacobian, covariance, mahalanobis_threshold, measured);
 }
 
 bool InvariantEkf::correct_body_velocity(
@@ -92,35 +99,65 @@ bool InvariantEkf::correct(
   const Eigen::Vector3d& innovation,
   const Jacobian& jacobian,
   const Eigen::Matrix3d& covariance,
-  const double mahalanobis_threshold)
+  const double mahalanobis_threshold,
+  const std::array<bool, 3>& measured)
 {
-  if (!innovation.allFinite()) {
+  // Rows of the measurement that take part. Leaving a row out is the limit
+  // of an infinite variance on it, without the conditioning that a large
+  // number would bring into the innovation covariance.
+  std::array<int, 3> rows{};
+  int size = 0;
+  for (int axis = 0; axis < 3; ++axis) {
+    if (measured[static_cast<std::size_t>(axis)]) {
+      rows[static_cast<std::size_t>(size++)] = axis;
+    }
+  }
+  if (size == 0) {
+    return true;
+  }
+
+  using Residual = Eigen::Matrix<double, Eigen::Dynamic, 1, 0, 3, 1>;
+  using Rows = Eigen::Matrix<double, Eigen::Dynamic, 15, 0, 3, 15>;
+  using Noise = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, 3, 3>;
+  using Gain = Eigen::Matrix<double, 15, Eigen::Dynamic, 0, 15, 3>;
+  Residual residual(size);
+  Rows selected(size, 15);
+  Noise noise(size, size);
+  for (int row = 0; row < size; ++row) {
+    const int axis = rows[static_cast<std::size_t>(row)];
+    residual(row) = innovation(axis);
+    selected.row(row) = jacobian.row(axis);
+    for (int column = 0; column < size; ++column) {
+      noise(row, column) = covariance(axis, rows[static_cast<std::size_t>(column)]);
+    }
+    // A measurement reported without noise would make the gain singular.
+    noise(row, row) += 1e-9;
+  }
+  if (!residual.allFinite()) {
     throw std::invalid_argument("measurement must be finite");
   }
-  const Covariance prior = state_.cov();
-  // A measurement reported without noise would make the gain singular.
-  const Eigen::Matrix3d noise = covariance + 1e-9 * Eigen::Matrix3d::Identity();
-  const Eigen::Matrix3d innovation_covariance =
-    jacobian * prior * jacobian.transpose() + noise;
-  const Eigen::Matrix3d innovation_information = innovation_covariance.inverse();
 
-  const double squared_distance = innovation.dot(innovation_information * innovation);
+  const Covariance prior = state_.cov();
+  const Noise innovation_covariance = selected * prior * selected.transpose() + noise;
+  const Noise innovation_information = innovation_covariance.inverse();
+
+  const double squared_distance = residual.dot(innovation_information * residual);
   if (squared_distance > mahalanobis_threshold * mahalanobis_threshold) {
     return false;
   }
 
-  const Eigen::Matrix<double, 15, 3> gain =
-    prior * jacobian.transpose() * innovation_information;
-  const Eigen::Matrix<double, 15, 1> correction = gain * innovation;
+  const Gain gain = prior * selected.transpose() * innovation_information;
+  const Eigen::Matrix<double, 15, 1> correction = gain * residual;
 
   InertialLieState::TangentVector group_correction = InertialLieState::TangentVector::Zero();
   group_correction.head<9>() = correction.head<9>();
   state_.setMat(InertialLieState::exp(group_correction)() * state_());
+  normalize_rotation(state_);
   state_.setAug(state_.aug() + correction.tail<6>());
 
-  const Covariance residual = Covariance::Identity() - gain * jacobian;
+  const Covariance remaining = Covariance::Identity() - gain * selected;
   const Covariance posterior =
-    residual * prior * residual.transpose() + gain * noise * gain.transpose();
+    remaining * prior * remaining.transpose() + gain * noise * gain.transpose();
   state_.setCov(0.5 * (posterior + posterior.transpose()));
   return true;
 }

@@ -37,6 +37,22 @@ InertialLieState make_state(
   return InertialLieState(matrix, covariance, biases);
 }
 
+/// Covariance of a state whose world position and heading are uncertain
+/// independently of each other, written in invariant coordinates.
+Covariance world_centred_covariance(
+  const Eigen::Vector3d& position, const double rotation_variance, const double position_variance)
+{
+  Covariance covariance = Covariance::Identity() * 1e-10;
+  const Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity() * rotation_variance;
+  const Eigen::Matrix3d lever = SO3<>::wedge(position);
+  covariance.block<3, 3>(0, 0) = rotation;
+  covariance.block<3, 3>(k_inertial_position, 0) = lever * rotation;
+  covariance.block<3, 3>(0, k_inertial_position) = rotation * lever.transpose();
+  covariance.block<3, 3>(k_inertial_position, k_inertial_position) =
+    lever * rotation * lever.transpose() + Eigen::Matrix3d::Identity() * position_variance;
+  return covariance;
+}
+
 InertialPredictionInput imu_sample(const Eigen::Vector3d& gyro, const Eigen::Vector3d& accel)
 {
   InertialPredictionInput input;
@@ -139,6 +155,24 @@ TEST(InertialProcessTest, covariance_grows_and_stays_positive_definite)
 
   EXPECT_GT(state.cov().trace(), initial_trace);
   expect_symmetric_positive_definite(state.cov());
+}
+
+TEST(InertialProcessTest, rotation_stays_orthonormal_over_a_long_run)
+{
+  InertialProcess process(k_gravity);
+  auto state = make_state(
+    Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+
+  // Ten minutes at 200 Hz while tumbling about all three axes.
+  auto input = imu_sample(Eigen::Vector3d(0.7, -0.4, 1.1), Eigen::Vector3d(0.0, 0.0, k_gravity));
+  input.delta = 5'000'000;
+  for (int step = 0; step < 120000; ++step) {
+    process.predict(state, input);
+  }
+
+  const Eigen::Matrix3d rotation = state.R()();
+  EXPECT_LT((rotation * rotation.transpose() - Eigen::Matrix3d::Identity()).norm(), 1e-12);
+  EXPECT_NEAR(rotation.determinant(), 1.0, 1e-12);
 }
 
 TEST(InertialProcessTest, zero_duration_leaves_the_state_untouched)
@@ -251,6 +285,187 @@ TEST(InvariantEkfTest, attitude_measurement_rotates_towards_the_measurement)
   ASSERT_TRUE(filter.correct_attitude(yaw_rotation(0.2), Eigen::Matrix3d::Identity() * 0.01));
 
   EXPECT_NEAR(yaw_of(filter.state()), 0.1, 1e-6);
+}
+
+TEST(RotationExponentialTest, small_angle_matches_the_rotation)
+{
+  // Angles on both sides of the switch to the series expansion.
+  for (const double angle : {1e-7, 5e-5, 9.9e-5, 1.1e-4, 1e-2}) {
+    const Eigen::Vector3d axis = Eigen::Vector3d(0.3, -0.5, 0.8).normalized();
+    const Eigen::Matrix3d expected = Eigen::AngleAxisd(angle, axis).toRotationMatrix();
+    const Eigen::Vector3d tangent = angle * axis;
+    EXPECT_LT((SO3<>::exp(tangent)() - expected).cwiseAbs().maxCoeff(), 1e-12) << angle;
+  }
+}
+
+TEST(RotationLogarithmTest, inverts_the_exponential_at_every_angle)
+{
+  const Eigen::Vector3d axis = Eigen::Vector3d(-0.6, 0.2, 0.7).normalized();
+  for (const double angle : {0.0, 1e-9, 1e-5, 9.9e-5, 1.1e-4, 0.1, 1.5, 3.0, M_PI - 1e-6}) {
+    const Eigen::Vector3d tangent = angle * axis;
+    const Eigen::Vector3d recovered = SO3<>::log(SO3<>::exp(tangent));
+    EXPECT_LT((recovered - tangent).norm(), 1e-8) << angle;
+  }
+}
+
+TEST(RotationLogarithmTest, stays_finite_when_rounding_moves_the_trace_past_three)
+{
+  Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();
+  rotation.diagonal().array() += 4e-16;
+  const Eigen::Vector3d tangent = SO3<>::log(SO3<>(rotation));
+  EXPECT_TRUE(tangent.allFinite());
+  EXPECT_LT(tangent.norm(), 1e-9);
+}
+
+TEST(InertialGroupTest, logarithm_inverts_the_exponential)
+{
+  for (const double scale : {1e-7, 5e-5, 2e-4, 0.3, 2.5}) {
+    InertialLieState::TangentVector tangent = InertialLieState::TangentVector::Zero();
+    tangent.head<9>() << 0.3, -0.5, 0.8, 1.0, -2.0, 0.5, 30.0, -12.0, 4.0;
+    tangent.head<3>() = scale * tangent.head<3>().normalized();
+    const InertialLieState::TangentVector recovered =
+      InertialLieState::log(InertialLieState::exp(tangent));
+    EXPECT_LT((recovered - tangent).norm(), 1e-7) << scale;
+  }
+}
+
+TEST(InertialGroupTest, inverse_composes_to_the_identity)
+{
+  const auto state = make_state(
+    Eigen::AngleAxisd(0.7, Eigen::Vector3d(0.2, 0.5, -0.8).normalized()).toRotationMatrix(),
+    Eigen::Vector3d(1.0, -2.0, 0.3), Eigen::Vector3d(340.0, 290.0, -5.0));
+  const InertialLieState::MatrixState product = state() * state.inverse()();
+  EXPECT_LT((product - InertialLieState::MatrixState::Identity()).cwiseAbs().maxCoeff(), 1e-10);
+}
+
+TEST(InertialGroupTest, adjoint_moves_a_perturbation_across_the_state)
+{
+  // X exp(xi) X^-1 = exp(Ad_X xi), which the noise propagation relies on.
+  const auto state = make_state(
+    Eigen::AngleAxisd(-1.1, Eigen::Vector3d(0.4, -0.3, 0.9).normalized()).toRotationMatrix(),
+    Eigen::Vector3d(0.6, 0.2, -0.1), Eigen::Vector3d(25.0, -40.0, 3.0));
+  InertialLieState::TangentVector tangent = InertialLieState::TangentVector::Zero();
+  tangent.head<9>() << 1e-3, -2e-3, 1.5e-3, 2e-3, 1e-3, -1e-3, -3e-3, 2e-3, 1e-3;
+
+  const InertialLieState::MatrixState left =
+    state() * InertialLieState::exp(tangent)() * state.inverse()();
+  const InertialLieState::TangentVector moved = InertialLieState::Ad(state) * tangent;
+  const InertialLieState::MatrixState right = InertialLieState::exp(moved)();
+
+  EXPECT_LT((left - right).cwiseAbs().maxCoeff(), 1e-10);
+}
+
+TEST(InvariantEkfTest, attitude_measurement_equal_to_the_estimate_is_accepted)
+{
+  InertialProcess process(k_gravity);
+  InvariantEkf filter(process);
+  const Eigen::Matrix3d rotation =
+    Eigen::AngleAxisd(0.4, Eigen::Vector3d(0.1, 0.7, 0.7).normalized()).toRotationMatrix();
+  filter.set_state(
+    make_state(rotation, Eigen::Vector3d::Zero(), Eigen::Vector3d(10.0, 5.0, 0.0),
+      Covariance::Identity() * 0.01));
+
+  ASSERT_TRUE(filter.correct_attitude(rotation, Eigen::Matrix3d::Identity() * 1e-4));
+  EXPECT_LT((filter.state().R()() - rotation).cwiseAbs().maxCoeff(), 1e-9);
+}
+
+TEST(InvariantEkfTest, attitude_measurement_half_a_turn_away_is_followed)
+{
+  InertialProcess process(k_gravity);
+  InvariantEkf filter(process);
+  filter.set_state(
+    make_state(
+      Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+      Covariance::Identity() * 1.0));
+
+  for (int step = 0; step < 20; ++step) {
+    ASSERT_TRUE(filter.correct_attitude(yaw_rotation(3.1), Eigen::Matrix3d::Identity() * 1e-4));
+  }
+  EXPECT_NEAR(yaw_of(filter.state()), 3.1, 1e-3);
+}
+
+TEST(InertialProcessTest, slow_rotation_is_integrated_in_full)
+{
+  InertialProcess process(k_gravity);
+  auto state = make_state(
+    Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+  // 0.005 rad/s gives steps of 5e-5 rad, below the series switch.
+  const double rate = 0.005;
+  for (int step = 0; step < 2000; ++step) {
+    process.predict(
+      state, imu_sample(Eigen::Vector3d(0.0, 0.0, rate), Eigen::Vector3d(0.0, 0.0, k_gravity)));
+  }
+
+  EXPECT_NEAR(yaw_of(state), rate * 2000 * 0.01, 1e-9);
+}
+
+TEST(InvariantEkfTest, small_attitude_corrections_far_from_the_origin_keep_the_position)
+{
+  InertialProcess process(k_gravity);
+  InvariantEkf filter(process);
+  const Eigen::Vector3d position(340.0, 290.0, -0.5);
+  // The position is known in the world and the heading is not, which in
+  // invariant coordinates is a rotation error about the vehicle.
+  Covariance covariance = Covariance::Identity() * 1e-8;
+  const Eigen::Matrix3d rotation_covariance = Eigen::Matrix3d::Identity() * 1e-4;
+  const Eigen::Matrix3d lever = SO3<>::wedge(position);
+  covariance.block<3, 3>(0, 0) = rotation_covariance;
+  covariance.block<3, 3>(k_inertial_position, 0) = lever * rotation_covariance;
+  covariance.block<3, 3>(0, k_inertial_position) = rotation_covariance * lever.transpose();
+  covariance.block<3, 3>(k_inertial_position, k_inertial_position) +=
+    lever * rotation_covariance * lever.transpose();
+  filter.set_state(
+    make_state(Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero(), position, covariance));
+
+  for (int step = 1; step <= 200; ++step) {
+    ASSERT_TRUE(
+      filter.correct_attitude(yaw_rotation(2e-5 * step), Eigen::Matrix3d::Identity() * 1e-6));
+  }
+
+  EXPECT_GT(yaw_of(filter.state()), 1e-3);
+  EXPECT_LT((filter.state()[1] - position).norm(), 1e-3);
+}
+
+TEST(InvariantEkfTest, depth_measurement_moves_only_the_height)
+{
+  InertialProcess process(k_gravity);
+  InvariantEkf filter(process);
+  const Eigen::Vector3d position(340.0, 290.0, -1.0);
+  filter.set_state(
+    make_state(
+      yaw_rotation(0.7), Eigen::Vector3d(0.4, 0.1, 0.0), position,
+      world_centred_covariance(position, 1e-4, 0.25)));
+
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+  covariance.diagonal() << k_unmeasured_axis_variance, k_unmeasured_axis_variance, 0.01;
+  // The horizontal values are far off and must not matter.
+  ASSERT_TRUE(filter.correct_position(Eigen::Vector3d(-5000.0, 9000.0, -3.0), covariance));
+
+  const Eigen::Vector3d corrected = filter.state()[1];
+  EXPECT_NEAR(corrected.x(), position.x(), 1e-6);
+  EXPECT_NEAR(corrected.y(), position.y(), 1e-6);
+  EXPECT_NEAR(corrected.z(), -1.0 + (-2.0) * 0.25 / 0.26, 1e-3);
+  EXPECT_LT((filter.state().R()() - yaw_rotation(0.7)).cwiseAbs().maxCoeff(), 1e-6);
+}
+
+TEST(InvariantEkfTest, horizontal_fix_leaves_the_height)
+{
+  InertialProcess process(k_gravity);
+  InvariantEkf filter(process);
+  const Eigen::Vector3d position(-120.0, 60.0, -4.0);
+  filter.set_state(
+    make_state(
+      yaw_rotation(-1.2), Eigen::Vector3d::Zero(), position,
+      world_centred_covariance(position, 1e-4, 1.0)));
+
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity();
+  covariance(2, 2) = k_unmeasured_axis_variance;
+  ASSERT_TRUE(filter.correct_position(Eigen::Vector3d(-118.0, 61.0, 777.0), covariance));
+
+  const Eigen::Vector3d corrected = filter.state()[1];
+  EXPECT_NEAR(corrected.x(), -119.0, 1e-3);
+  EXPECT_NEAR(corrected.y(), 60.5, 1e-3);
+  EXPECT_NEAR(corrected.z(), position.z(), 1e-6);
 }
 
 TEST(InvariantEkfTest, mahalanobis_gate_rejects_an_outlier)

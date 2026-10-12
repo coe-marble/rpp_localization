@@ -12,7 +12,10 @@ namespace rpp_localization::InEKF
 struct InertialProcessNoise
 {
   Eigen::Vector3d gyro = Eigen::Vector3d::Constant(1e-3);
-  Eigen::Vector3d accel = Eigen::Vector3d::Constant(1e-2);
+  Eigen::Vector3d accel = Eigen::Vector3d::Constant(1e-1);
+  /// Random walk of the position that the velocity does not explain. It
+  /// keeps position fixes in use next to an accurate velocity sensor.
+  Eigen::Vector3d position = Eigen::Vector3d::Constant(5e-2);
   Eigen::Vector3d gyro_bias = Eigen::Vector3d::Constant(1e-5);
   Eigen::Vector3d accel_bias = Eigen::Vector3d::Constant(1e-4);
 };

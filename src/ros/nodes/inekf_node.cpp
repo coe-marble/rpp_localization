@@ -11,15 +11,19 @@
 #include "Eigen/Dense"
 #include "Eigen/Geometry"
 #include "ament_index_cpp/get_package_share_path.hpp"
+#include "builtin_interfaces/msg/time.hpp"
+#include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist_with_covariance_stamped.hpp"
+#include "geometry_msgs/msg/vector3.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rpp_cpp/context_builder.hpp"
 #include "rpp_cpp/data_manager.hpp"
 #include "rpp_cpp/rpp_paths.hpp"
 #include "rpp_localization/inekf/inertial_payload.hpp"
+#include "rpp_localization/inekf/invariant_ekf.hpp"
 #include "rpp_localization/inekf/so3.hpp"
 #include "rpp_localization/ros/invariant_localization_script.hpp"
 #include "sensor_msgs/msg/imu.hpp"
@@ -33,11 +37,12 @@ namespace rpp_localization
 
 /// Drives an InvariantFilter composition from ROS topics.
 ///
-/// Every IMU message is one prediction. Poses are fused as positions and
-/// twists as body-frame velocities, each at the lever arm of its sensor
-/// frame. The filter body is the IMU; the published odometry is converted
-/// to the base link through the fixed transform between the two. Sensor
-/// frames are assumed to be aligned with the base link.
+/// Every IMU message is one prediction. Poses are fused as positions, and
+/// twists and the twist of odometry messages as body-frame velocities, each
+/// at the lever arm of its sensor frame. Sensor readings are rotated into
+/// the base link axes with the fixed transform of their frame. The filter
+/// body sits at the IMU with the axes of the base link; the published
+/// odometry is moved to the base link origin.
 class InvariantLocalizationNode : public rclcpp::Node
 {
 public:
@@ -51,6 +56,11 @@ public:
     publish_tf_ = declare_parameter("publish_tf", true);
     use_orientation_ = declare_parameter("imu0_use_orientation", true);
     orientation_variance_ = declare_parameter("imu0_orientation_variance", 1e-4);
+    // Smallest variance accepted on a fused position axis, in m^2.
+    minimum_position_variance_ = declare_parameter("minimum_position_variance", 1e-4);
+    if (std::isnan(minimum_position_variance_) || minimum_position_variance_ < 0.0) {
+      throw std::invalid_argument("minimum_position_variance must not be negative");
+    }
     initial_covariance_ = declare_parameter(
       "initial_estimate_covariance",
       std::vector<double>{
@@ -84,12 +94,50 @@ public:
       // A pose is stamped with the world frame, so its sensor frame is a
       // parameter. Empty means the sensor sits at the base link origin.
       const auto sensor_frame = declare_parameter(name + "_frame", std::string());
+      // Axes of the position that are fused, as x, y, z.
+      const auto position_axes = declare_parameter(
+        name + "_position_axes", std::vector<bool>{true, true, true});
+      if (position_axes.size() != 3) {
+        throw std::invalid_argument(name + "_position_axes must contain 3 values");
+      }
       pose_subscriptions_.push_back(
         create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
           topic, rclcpp::SensorDataQoS(),
-          [this, name, threshold, sensor_frame](
+          [this, name, threshold, sensor_frame, position_axes](
             const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr message) {
-            on_pose(*message, name, sensor_frame, threshold);
+            on_position(
+              message->pose.pose.position, message->pose.covariance,
+              position_axes, message->header.frame_id, sensor_frame,
+              message->header.stamp, name, threshold);
+          }));
+    }
+
+    for (std::size_t index = 0;; ++index) {
+      const auto name = "odom" + std::to_string(index);
+      const auto topic = declare_parameter(name, std::string());
+      if (topic.empty()) {
+        break;
+      }
+      const auto threshold = rejection_threshold(name);
+      // The velocity of an odometry message is always fused. Its position
+      // is fused only on the axes selected here, as x, y, z.
+      const auto position_axes = declare_parameter(
+        name + "_position_axes", std::vector<bool>{false, false, false});
+      if (position_axes.size() != 3) {
+        throw std::invalid_argument(name + "_position_axes must contain 3 values");
+      }
+      odometry_subscriptions_.push_back(
+        create_subscription<nav_msgs::msg::Odometry>(
+          topic, rclcpp::SensorDataQoS(),
+          [this, name, threshold, position_axes](
+            const nav_msgs::msg::Odometry::ConstSharedPtr message) {
+            on_body_velocity(
+              message->twist.twist.linear, message->twist.covariance,
+              message->child_frame_id, message->header.stamp, name, threshold);
+            on_position(
+              message->pose.pose.position, message->pose.covariance, position_axes,
+              message->header.frame_id, message->child_frame_id, message->header.stamp,
+              name + "_position", threshold);
           }));
     }
 
@@ -105,7 +153,9 @@ public:
           topic, rclcpp::SensorDataQoS(),
           [this, name, threshold](
             const geometry_msgs::msg::TwistWithCovarianceStamped::ConstSharedPtr message) {
-            on_twist(*message, name, threshold);
+            on_body_velocity(
+              message->twist.twist.linear, message->twist.covariance,
+              message->header.frame_id, message->header.stamp, name, threshold);
           }));
     }
   }
@@ -156,17 +206,28 @@ private:
     return threshold;
   }
 
-  /// Position of a frame relative to the base link, in the base link frame.
-  std::optional<Eigen::Vector3d> frame_offset(const std::string& frame_id)
+  /// Fixed pose of a sensor frame in the base link frame.
+  struct Mounting
+  {
+    Eigen::Vector3d offset = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();
+  };
+
+  std::optional<Mounting> mounting(const std::string& frame_id)
   {
     if (frame_id.empty() || frame_id == base_link_frame_id_) {
-      return Eigen::Vector3d::Zero();
+      return Mounting{};
     }
     try {
       const auto transform = tf_buffer_.lookupTransform(
-        base_link_frame_id_, frame_id, tf2::TimePointZero);
-      const auto& translation = transform.transform.translation;
-      return Eigen::Vector3d(translation.x, translation.y, translation.z);
+        base_link_frame_id_, frame_id, tf2::TimePointZero).transform;
+      Mounting result;
+      result.offset = Eigen::Vector3d(
+        transform.translation.x, transform.translation.y, transform.translation.z);
+      result.rotation = Eigen::Quaterniond(
+        transform.rotation.w, transform.rotation.x, transform.rotation.y,
+        transform.rotation.z).normalized().toRotationMatrix();
+      return result;
     } catch (const tf2::TransformException& error) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
@@ -176,44 +237,41 @@ private:
     }
   }
 
-  /// Position of a sensor frame relative to the IMU, which is the filter body.
-  std::optional<Eigen::Vector3d> lever_arm(const std::string& frame_id)
-  {
-    const auto offset = frame_offset(frame_id);
-    if (!offset || !imu_offset_) {
-      return std::nullopt;
-    }
-    return *offset - *imu_offset_;
-  }
-
   void on_imu(const sensor_msgs::msg::Imu& message)
   {
     if (!imu_offset_) {
-      imu_offset_ = frame_offset(message.header.frame_id);
-      if (!imu_offset_) {
+      const auto imu_mounting = mounting(message.header.frame_id);
+      if (!imu_mounting) {
         return;
       }
+      imu_offset_ = imu_mounting->offset;
+      imu_rotation_ = imu_mounting->rotation;
     }
     Vector6 sample;
     sample <<
-      message.angular_velocity.x, message.angular_velocity.y, message.angular_velocity.z,
+      imu_rotation_ * Eigen::Vector3d(
+      message.angular_velocity.x, message.angular_velocity.y, message.angular_velocity.z),
+      imu_rotation_ * Eigen::Vector3d(
       message.linear_acceleration.x, message.linear_acceleration.y,
-      message.linear_acceleration.z;
+      message.linear_acceleration.z);
     if (!sample.allFinite()) {
       return;
     }
 
     const auto stamp = rclcpp::Time(message.header.stamp).nanoseconds();
-    const bool has_orientation = message.orientation_covariance[0] >= 0.0;
     const Eigen::Quaterniond orientation(
       message.orientation.w, message.orientation.x, message.orientation.y,
       message.orientation.z);
+    const bool has_orientation =
+      message.orientation_covariance[0] >= 0.0 && orientation.norm() > 0.5;
+    // The message gives the attitude of the IMU frame; the filter estimates
+    // that of the base link.
+    const Eigen::Matrix3d attitude = has_orientation ?
+      (orientation.normalized().toRotationMatrix() * imu_rotation_.transpose()).eval() :
+      Eigen::Matrix3d::Identity().eval();
 
     if (!initialized_) {
-      initialize(
-        has_orientation && orientation.norm() > 0.5 ?
-        orientation.normalized().toRotationMatrix() : Eigen::Matrix3d::Identity().eval(),
-        stamp);
+      initialize(attitude, stamp);
       return;
     }
     if (stamp <= reference_time_) {
@@ -229,7 +287,7 @@ private:
     }
     reference_time_ = stamp;
 
-    if (use_orientation_ && has_orientation && orientation.norm() > 0.5) {
+    if (use_orientation_ && has_orientation) {
       Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
       for (int axis = 0; axis < 3; ++axis) {
         const double variance = message.orientation_covariance[4 * axis];
@@ -237,8 +295,7 @@ private:
       }
       InvariantFilter::InvariantMeasurement measurement;
       measurement.kind() = k_attitude;
-      plugins::detail::write_row_major(
-        measurement.values(), orientation.normalized().toRotationMatrix());
+      plugins::detail::write_row_major(measurement.values(), attitude);
       fill_measurement(
         measurement, covariance, Eigen::Vector3d::Zero(), stamp,
         std::numeric_limits<double>::infinity(), "imu0_attitude");
@@ -247,58 +304,136 @@ private:
     publish();
   }
 
-  void on_pose(
-    const geometry_msgs::msg::PoseWithCovarianceStamped& message,
-    const std::string& name,
+  /// Fuses the selected axes of a world position of the point where
+  /// `sensor_frame` is mounted.
+  void on_position(
+    const geometry_msgs::msg::Point& position,
+    const std::array<double, 36>& covariance,
+    const std::vector<bool>& axes,
+    const std::string& frame_id,
     const std::string& sensor_frame,
+    const builtin_interfaces::msg::Time& stamp,
+    const std::string& name,
     const double threshold)
   {
-    if (!initialized_) {
+    if (!initialized_ || (!axes[0] && !axes[1] && !axes[2])) {
       return;
     }
-    if (!message.header.frame_id.empty() && message.header.frame_id != world_frame_id_) {
+    if (!frame_id.empty() && frame_id != world_frame_id_) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "%s must be given in %s, not %s", name.c_str(),
-        world_frame_id_.c_str(), message.header.frame_id.c_str());
+        world_frame_id_.c_str(), frame_id.c_str());
       return;
     }
-    const auto arm = lever_arm(sensor_frame);
-    if (!arm) {
+    const auto sensor = mounting(sensor_frame);
+    if (!sensor || !imu_offset_) {
       return;
     }
 
-    const auto& position = message.pose.pose.position;
+    // An axis that is not fused is marked as not measured, and the filter
+    // leaves it out of the update.
+    Eigen::Matrix3d position_covariance = linear_covariance(covariance);
+    for (int axis = 0; axis < 3; ++axis) {
+      if (!axes[static_cast<std::size_t>(axis)]) {
+        position_covariance.row(axis).setZero();
+        position_covariance.col(axis).setZero();
+        position_covariance(axis, axis) = InEKF::k_unmeasured_axis_variance;
+      } else if (position_covariance(axis, axis) < minimum_position_variance_) {
+        // A message without a covariance would otherwise be taken as exact.
+        position_covariance(axis, axis) = minimum_position_variance_;
+      }
+    }
+
+    const Eigen::Vector3d measured(position.x, position.y, position.z);
+    if (!adopt_first_position(measured, axes, sensor->offset - *imu_offset_, name)) {
+      return;
+    }
+
     InvariantFilter::InvariantMeasurement measurement;
     measurement.kind() = k_position;
     plugins::detail::write_values(
-      measurement.values(), Eigen::Vector3d(position.x, position.y, position.z));
+      measurement.values(), measured);
     fill_measurement(
-      measurement, linear_covariance(message.pose.covariance), *arm,
-      rclcpp::Time(message.header.stamp).nanoseconds(), threshold, name);
+      measurement, position_covariance, sensor->offset - *imu_offset_,
+      rclcpp::Time(stamp).nanoseconds(), threshold, name);
     accept(filter_->correct(std::move(measurement)), name);
   }
 
-  void on_twist(
-    const geometry_msgs::msg::TwistWithCovarianceStamped& message,
+  /// The filter starts at the world origin. The first measurement of a world
+  /// axis places the estimate there, since a gated correction could not
+  /// cover the distance. The world covariance stays as it was.
+  bool adopt_first_position(
+    const Eigen::Vector3d& measured,
+    const std::vector<bool>& axes,
+    const Eigen::Vector3d& arm,
+    const std::string& name)
+  {
+    const Eigen::Vector3d imu_position = measured - state_.R()() * arm;
+    Eigen::Vector3d shift = Eigen::Vector3d::Zero();
+    bool adopted = false;
+    for (int axis = 0; axis < 3; ++axis) {
+      const auto index = static_cast<std::size_t>(axis);
+      if (axes[index] && !position_known_[index]) {
+        shift[axis] = imu_position[axis] - state_[1][axis];
+        position_known_[index] = true;
+        adopted = true;
+      }
+    }
+    if (!adopted) {
+      return true;
+    }
+
+    InEKF::InertialLieState::MatrixState matrix = state_();
+    matrix.block<3, 1>(0, 4) += shift;
+    InEKF::InertialLieState::MatrixCov jacobian = InEKF::InertialLieState::MatrixCov::Identity();
+    jacobian.block<3, 3>(InEKF::k_inertial_position, InEKF::k_inertial_rotation) =
+      InEKF::SO3<>::wedge(shift);
+    const InEKF::InertialLieState::MatrixCov covariance =
+      jacobian * state_.cov() * jacobian.transpose();
+
+    InvariantFilter::InertialEstimate estimate;
+    plugins::detail::write_inertial_state(
+      estimate.state(), InEKF::InertialLieState(matrix, covariance, state_.aug()));
+    plugins::detail::write_values(estimate.angularVelocity(), angular_velocity_);
+    estimate.referenceTimeNs() = reference_time_;
+    const auto status = filter_->initialize(std::move(estimate));
+    if (status.code() != plugins::detail::k_inertial_ok) {
+      RCLCPP_WARN(
+        get_logger(), "%s could not place the estimate: %s", name.c_str(),
+        std::string(status.message()).c_str());
+      return false;
+    }
+    state_ = InEKF::InertialLieState(matrix, covariance, state_.aug());
+    return true;
+  }
+
+  /// Fuses a linear velocity measured in `frame_id` as the body velocity
+  /// of the point where that frame is mounted.
+  void on_body_velocity(
+    const geometry_msgs::msg::Vector3& linear,
+    const std::array<double, 36>& covariance,
+    const std::string& frame_id,
+    const builtin_interfaces::msg::Time& stamp,
     const std::string& name,
     const double threshold)
   {
     if (!initialized_) {
       return;
     }
-    const auto arm = lever_arm(message.header.frame_id);
-    if (!arm) {
+    const auto sensor = mounting(frame_id);
+    if (!sensor || !imu_offset_) {
       return;
     }
 
-    const auto& linear = message.twist.twist.linear;
     InvariantFilter::InvariantMeasurement measurement;
     measurement.kind() = k_body_velocity;
     plugins::detail::write_values(
-      measurement.values(), Eigen::Vector3d(linear.x, linear.y, linear.z));
+      measurement.values(),
+      (sensor->rotation * Eigen::Vector3d(linear.x, linear.y, linear.z)).eval());
     fill_measurement(
-      measurement, linear_covariance(message.twist.covariance), *arm,
-      rclcpp::Time(message.header.stamp).nanoseconds(), threshold, name);
+      measurement,
+      sensor->rotation * linear_covariance(covariance) * sensor->rotation.transpose(),
+      sensor->offset - *imu_offset_, rclcpp::Time(stamp).nanoseconds(), threshold, name);
     accept(filter_->correct(std::move(measurement)), name);
   }
 
@@ -465,10 +600,14 @@ private:
   pose_subscriptions_;
   std::vector<rclcpp::Subscription<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr>
   twist_subscriptions_;
+  std::vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> odometry_subscriptions_;
 
+  double minimum_position_variance_{0.0};
   bool initialized_{false};
+  std::array<bool, 3> position_known_{false, false, false};
   std::int64_t reference_time_{0};
   std::optional<Eigen::Vector3d> imu_offset_;
+  Eigen::Matrix3d imu_rotation_ = Eigen::Matrix3d::Identity();
   InEKF::InertialLieState state_;
   Eigen::Vector3d angular_velocity_ = Eigen::Vector3d::Zero();
 };

@@ -1,6 +1,7 @@
 #ifndef RPP_LOCALIZATION__INEKF__INVARIANT_EKF_HPP_
 #define RPP_LOCALIZATION__INEKF__INVARIANT_EKF_HPP_
 
+#include <array>
 #include <limits>
 
 #include "Eigen/Dense"
@@ -8,6 +9,9 @@
 
 namespace rpp_localization::InEKF
 {
+
+/// Variance, in m^2, from which a position axis counts as not measured.
+inline constexpr double k_unmeasured_axis_variance = 1e12;
 
 /// Right-invariant extended Kalman filter on an inertial navigation state.
 ///
@@ -34,6 +38,9 @@ public:
 
   /// World position of a sensor mounted at `lever_arm` in the body frame.
   /// Returns false when the Mahalanobis gate rejects the measurement.
+  /// A world axis whose variance is at least `k_unmeasured_axis_variance`
+  /// is not measured and is left out of the update exactly, which is how a
+  /// depth sensor or a horizontal fix is fused.
   bool correct_position(
     const Eigen::Vector3d& position,
     const Eigen::Matrix3d& covariance,
@@ -66,7 +73,8 @@ private:
     const Eigen::Vector3d& innovation,
     const Jacobian& jacobian,
     const Eigen::Matrix3d& covariance,
-    double mahalanobis_threshold);
+    double mahalanobis_threshold,
+    const std::array<bool, 3>& measured = {true, true, true});
 
   InertialPredictionModel& model_;
   InertialLieState state_;

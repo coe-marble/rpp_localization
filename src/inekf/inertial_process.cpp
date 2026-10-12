@@ -21,7 +21,7 @@ void InertialProcess::set_noise(const InertialProcessNoise& noise)
 {
   Eigen::Matrix<double, 15, 1> standard_deviation;
   standard_deviation <<
-    noise.gyro, noise.accel, Eigen::Vector3d::Zero(), noise.gyro_bias, noise.accel_bias;
+    noise.gyro, noise.accel, noise.position, noise.gyro_bias, noise.accel_bias;
   if (!standard_deviation.allFinite() || (standard_deviation.array() < 0.0).any()) {
     throw std::invalid_argument("inertial process noise must be finite and non-negative");
   }
@@ -64,6 +64,7 @@ void InertialProcess::predict(
   next.block<3, 1>(0, 4) = position + velocity * delta + 0.5 * acceleration * delta * delta;
 
   state.setMat(next);
+  normalize_rotation(state);
   state.setCov(0.5 * (propagated + propagated.transpose()));
 }
 
