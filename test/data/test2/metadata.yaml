@@ -1,0 +1,38 @@
+rosbag2_bagfile_information:
+  version: 9
+  storage_identifier: mcap
+  duration:
+    nanoseconds: 61201000000
+  starting_time:
+    nanoseconds_since_epoch: 47580000000
+  message_count: 6121
+  topics_with_message_count:
+    - topic_metadata:
+        name: /imu/data
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          []
+        type_description_hash: ""
+      message_count: 3061
+    - topic_metadata:
+        name: /jackal_velocity_controller/odom
+        type: nav_msgs/msg/Odometry
+        serialization_format: cdr
+        offered_qos_profiles:
+          []
+        type_description_hash: ""
+      message_count: 3060
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - 0_test2_2026_11_10-16_47_19.mcap
+  files:
+    - path: 0_test2_2026_11_10-16_47_19.mcap
+      starting_time:
+        nanoseconds_since_epoch: 47580000000
+      duration:
+        nanoseconds: 61201000000
+      message_count: 6121
+  custom_data: ~
+  ros_distro: lyrical
