@@ -17,7 +17,7 @@
 #include <vector>
 
 #include <ament_index_cpp/get_package_share_path.hpp>
-#include <rpp_cpp/context_builder.hpp>
+#include <rpp_cpp/component_runtime_builder.hpp>
 #include <rpp_cpp/data_manager.hpp>
 #include <rpp_cpp/rpp_paths.hpp>
 
@@ -35,9 +35,6 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/qos.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/filters/extended_kalman_filter.hpp"
-#include "rpp_localization/models/constant_acceleration_model.hpp"
-#include "rpp_localization/filters/unscented_kalman_filter.hpp"
 #include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
 #include "rpp_localization/core/validation.hpp"
@@ -2266,9 +2263,8 @@ void RosFilterBase::load_filter_params()
 
   // Try to resolve tf_prefix
   std::string tf_prefix = "";
-  std::string tf_prefix_path = "";
   this->declare_parameter("tf_prefix", rclcpp::PARAMETER_STRING);
-  if (this->get_parameter("tf_prefix", tf_prefix_path)) {
+  if (this->get_parameter("tf_prefix", tf_prefix)) {
     // Append the tf prefix in a tf2-friendly manner
     filter_utilities::append_prefix(tf_prefix, this->map_frame_id_);
     filter_utilities::append_prefix(tf_prefix, this->odom_frame_id_);
@@ -2545,7 +2541,7 @@ void RosFilterBase::initialize_rpp_filter()
   reset_rpp_filter();
   rpp_filter_.reset();
   rpp_script_.reset();
-  rpp_context_.reset();
+  rpp_runtime_.reset();
   rpp_use_control_ = declare_parameter("use_control", false);
   rpp_control_update_vector_ = declare_parameter(
     "control_config", std::vector<bool>(TWIST_SIZE, false));
@@ -2562,19 +2558,23 @@ void RosFilterBase::initialize_rpp_filter()
     "script", "rpp_localization::localization");
   const auto configuration = declare_parameter<std::string>(
     "configuration", default_configuration_);
+  const bool activate_on_start = declare_parameter<bool>(
+    "controller.activate_on_start", true);
   const auto script = parse_script_reference(script_reference);
+  const auto workspace = declare_parameter<std::string>("rpp_workspace", "");
 
   rpp::RppDataManager data_manager(
     rpp::RPP_HOME,
-    ament_index_cpp::get_package_share_path(script.library).string());
-  rpp::ComponentContextBuilder context_builder(data_manager);
+    workspace.empty() ? ament_index_cpp::get_package_share_path(script.library).string() : workspace);
+  rpp::ComponentRuntimeBuilder runtime_builder(data_manager);
   const std::optional<std::string> selected_configuration = configuration.empty() ?
     std::nullopt : std::optional<std::string>(configuration);
-  rpp_context_ = std::make_unique<rpp::ComponentContext>(
-    context_builder.build_script_from_library(
-      script.library, script.name, selected_configuration));
-  rpp_script_ = std::make_unique<LocalizationScript>(*rpp_context_);
-  rpp_script_->initialize();
+  rpp_runtime_ = std::make_unique<rpp::ScriptRuntime<>>(
+    runtime_builder.build_script({
+      rpp::LibraryScript{script.library, script.name}, selected_configuration, std::nullopt}));
+  rpp_runtime_->configure().require_success("Localization script configuration");
+  rpp_script_ = std::make_unique<LocalizationScript>(rpp_runtime_->get_context());
+  rpp_script_->initialize(activate_on_start);
   rpp_filter_ = rpp_script_->filter();
   if (!rpp_filter_)
   {
@@ -2589,6 +2589,7 @@ void RosFilterBase::reset_rpp_filter()
   rpp_covariance_ *= k_initial_covariance;
   rpp_control_.stamp = 0;
   rpp_control_.control.setZero(TWIST_SIZE);
+  _latest_control = rpp_control_;
   rpp_last_measurement_time_ = 0;
   rpp_filter_initialized_ = false;
   rpp_remote_reset_required_ = false;
@@ -2654,6 +2655,12 @@ void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
   }
 
   const auto result = rpp_filter_->correct(std::move(make_measurement(measurement)));
+  if (result.status().code() == 6) {
+    RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
+      "Dropping stale measurement from " << measurement.topic_name_ << ": " <<
+      std::string(result.status().message()));
+    return;
+  }
   require_ok(result.status(), "RPP filter correction failed");
   apply_estimate(result.estimate(), rpp_state_, rpp_covariance_);
 }
@@ -2709,6 +2716,11 @@ void RosFilterBase::process_rpp_measurement(const Measurement & measurement)
 bool RosFilterBase::rpp_filter_debug() const noexcept
 {
   return rpp_debug_;
+}
+
+bool RosFilterBase::rpp_filter_active() const
+{
+  return rpp_script_ && rpp_script_->is_active();
 }
 
 bool RosFilterBase::rpp_filter_initialized() const noexcept

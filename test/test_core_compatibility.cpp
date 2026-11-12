@@ -6,6 +6,7 @@
 #include "rpp_localization/core/model_base.hpp"
 #include "rpp_localization/core/validation.hpp"
 #include "rpp_localization/filters/extended_kalman_filter.hpp"
+#include "rpp_localization/filters/unscented_kalman_filter.hpp"
 #include "rpp_localization/models/constant_acceleration_model.hpp"
 
 namespace rpp_localization
@@ -144,6 +145,29 @@ TEST(CoreCompatibilityTest, dispatches_filter_operations)
   EXPECT_EQ(filter.predicted_delta, 789);
 }
 
+TEST(CoreCompatibilityTest, control_commands_start_with_six_zero_values)
+{
+  const ControlCommand command;
+  EXPECT_EQ(command.stamp, 0);
+  ASSERT_EQ(command.control.size(), TWIST_SIZE);
+  EXPECT_TRUE(command.control.isZero());
+}
+
+TEST(CoreCompatibilityTest, mahalanobis_gating_uses_inverse_covariance_and_rejects_outliers)
+{
+  Eigen::VectorXd innovation(1);
+  innovation << 4.0;
+  Eigen::MatrixXd inverse_covariance(1, 1);
+  inverse_covariance << 0.25;
+  EXPECT_TRUE(filter_utilities::check_mahalanobis_threshold(innovation, inverse_covariance, 3.0));
+  EXPECT_FALSE(filter_utilities::check_mahalanobis_threshold(innovation, inverse_covariance, 2.0));
+  EXPECT_FALSE(filter_utilities::check_mahalanobis_threshold(innovation, inverse_covariance, 1.0));
+  EXPECT_TRUE(filter_utilities::check_mahalanobis_threshold(
+    innovation, inverse_covariance, std::numeric_limits<double>::infinity()));
+  innovation(0) = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(filter_utilities::check_mahalanobis_threshold(innovation, inverse_covariance, 3.0));
+}
+
 TEST(CoreCompatibilityTest, ekf_uses_an_injected_runtime_model)
 {
   RecordingModel model(STATE_SIZE);
@@ -155,6 +179,35 @@ TEST(CoreCompatibilityTest, ekf_uses_an_injected_runtime_model)
   EXPECT_EQ(model.last_delta, 250'000'000);
   EXPECT_DOUBLE_EQ(model.get_state()(0), 0.25);
   EXPECT_DOUBLE_EQ(model.get_state()(1), 0.25);
+}
+
+TEST(CoreCompatibilityTest, ukf_checkpoint_preserves_sigma_points_across_correction)
+{
+  ConstantAccelerationModel model(STATE_SIZE);
+  model.initialize_runtime();
+  model.set_state_covariance(CovarianceMatrix::Identity(STATE_SIZE, STATE_SIZE));
+  Ukf filter(model);
+  filter.initialize_runtime(CovarianceMatrix::Identity(STATE_SIZE, STATE_SIZE) * 0.01,
+    false, 0.001, 0.0, 2.0);
+  filter.predict(100'000'000, 100'000'000);
+  const auto predicted_state = model.get_state();
+  const auto predicted_covariance = model.get_state_covariance();
+  auto checkpoint = filter.clone();
+
+  Measurement measurement;
+  measurement.time_ = 100'000'000;
+  measurement.measurement_ = StateVector::Constant(STATE_SIZE, 0.1);
+  measurement.covariance_ = CovarianceMatrix::Identity(STATE_SIZE, STATE_SIZE) * 0.01;
+  measurement.update_vector_.assign(STATE_SIZE, true);
+  filter.correct(measurement);
+  const auto corrected_state = model.get_state();
+  const auto corrected_covariance = model.get_state_covariance();
+
+  model.set_state(predicted_state);
+  model.set_state_covariance(predicted_covariance);
+  checkpoint->correct(measurement);
+  EXPECT_TRUE(model.get_state().isApprox(corrected_state));
+  EXPECT_TRUE(model.get_state_covariance().isApprox(corrected_covariance));
 }
 
 }  // namespace rpp_localization

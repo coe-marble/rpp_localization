@@ -35,10 +35,10 @@ public:
   Ukf15() = default;
   ~Ukf15() override = default;
 
-  void initialize(const rpp::ComponentContext& context) override
+  rpp::CallbackResult on_configure(const rpp::ComponentContext& context) override
   {
     load_configuration(context);
-    Filter15PluginBase::initialize(context);
+    return Filter15PluginBase::on_configure(context);
   }
 
 protected:

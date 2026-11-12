@@ -1,5 +1,6 @@
 from pathlib import Path
 import math
+import threading
 import time
 import unittest
 
@@ -8,7 +9,10 @@ from launch.actions import ExecuteProcess, TimerAction
 from launch_ros.actions import Node
 import launch_testing
 import launch_testing.actions
+import launch_testing.asserts
 import rclpy
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.parameter import Parameter
 from nav_msgs.msg import Odometry
 
 
@@ -32,6 +36,7 @@ def generate_test_description() -> tuple[LaunchDescription, dict[str, ExecutePro
         package="tf2_ros",
         executable="static_transform_publisher",
         name="test_base_link_to_imu_link",
+        parameters=[{"use_sim_time": True}],
         arguments=[
             "--x", "0.0", "--y", "-0.3", "--z", "0.52",
             "--roll", "1.570796327", "--pitch", "0.0", "--yaw", "-1.570796327",
@@ -59,35 +64,68 @@ class TestEkfRosbagIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         rclpy.init()
-        cls.node = rclpy.create_node("rpp_localization_rosbag_evaluator")
+        cls.node = rclpy.create_node(
+            "rpp_localization_rosbag_evaluator",
+            parameter_overrides=[Parameter("use_sim_time", value=True)],
+        )
         cls.final_odometry: Odometry | None = None
+        cls.odometry_condition = threading.Condition()
+        cls.last_odometry_received_at = 0.0
         cls.subscription = cls.node.create_subscription(
             Odometry,
             "/odometry/filtered",
             cls._on_odometry,
             10,
         )
+        # Continue receiving output while the test waits for bag playback to finish.
+        cls.executor = SingleThreadedExecutor()
+        cls.executor.add_node(cls.node)
+        cls.spin_thread = threading.Thread(target=cls.executor.spin, daemon=True)
+        cls.spin_thread.start()
 
     @classmethod
     def tearDownClass(cls) -> None:
+        cls.executor.shutdown()
+        cls.spin_thread.join()
         cls.node.destroy_node()
         rclpy.shutdown()
 
     @classmethod
     def _on_odometry(cls, message: Odometry) -> None:
-        cls.final_odometry = message
+        with cls.odometry_condition:
+            cls.final_odometry = message
+            cls.last_odometry_received_at = time.monotonic()
+            cls.odometry_condition.notify_all()
 
     def test_final_filtered_position(self, proc_info: object, bag_player: ExecuteProcess) -> None:
         proc_info.assertWaitForShutdown(process=bag_player, timeout=75)
-        proc_info.assertProcessExit(process=bag_player)
+        launch_testing.asserts.assertExitCodes(proc_info, process=bag_player)
 
+        # Drain delayed output and retain the newest sample, rather than returning
+        # as soon as the first queued odometry message is received.
         deadline = time.monotonic() + 5.0
-        while self.final_odometry is None and time.monotonic() < deadline:
-            rclpy.spin_once(self.node, timeout_sec=0.1)
+        with self.odometry_condition:
+            while True:
+                now = time.monotonic()
+                remaining = deadline - now
+                if remaining <= 0.0:
+                    break
+                quiet_for = now - self.last_odometry_received_at
+                if self.final_odometry is not None and quiet_for >= 0.5:
+                    break
+                wait_time = remaining
+                if self.final_odometry is not None:
+                    wait_time = min(remaining, 0.5 - quiet_for)
+                self.odometry_condition.wait(timeout=wait_time)
+            final_odometry = self.final_odometry
 
-        self.assertIsNotNone(self.final_odometry)
-        assert self.final_odometry is not None
-        position = self.final_odometry.pose.pose.position
+        self.assertIsNotNone(
+            final_odometry,
+            "No /odometry/filtered messages received during playback or the drain window; "
+            f"discovered publishers: {self.node.count_publishers('/odometry/filtered')}",
+        )
+        assert final_odometry is not None
+        position = final_odometry.pose.pose.position
         distance = math.dist(
             (position.x, position.y, position.z),
             _EXPECTED_POSITION,

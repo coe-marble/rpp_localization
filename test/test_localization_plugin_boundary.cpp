@@ -55,10 +55,9 @@ public:
     k_invalid_covariance
   };
 
-  void initialize(const rpp::ComponentContext&) override {}
-
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
+    ++prediction_count_;
     reference_time_ = input.referenceTimeNs();
     delta_ = input.deltaNs();
     const auto input_control = input.control();
@@ -89,6 +88,7 @@ public:
   }
 
   OutputMode mode_{OutputMode::k_valid};
+  std::size_t prediction_count_{0};
   rpp_localization::TimestampNs reference_time_{0};
   rpp_localization::DurationNs delta_{0};
   bool control_present_{false};
@@ -263,6 +263,33 @@ TEST(LocalizationFilter15PluginBoundary, PreservesStaleTimeAndCovarianceNormaliz
   EXPECT_EQ(corrected.status().code(), 0);
   EXPECT_GT(corrected.estimate().state().values()[0], 1.0);
   EXPECT_LT(corrected.estimate().state().values()[0], 2.0);
+}
+
+TEST(LocalizationFilter15PluginBoundary, ReplaysOnlyTheSuffixAndRejectsExpiredHistory)
+{
+  auto model = std::make_shared<FakeNavModel15>();
+  BoundaryEkf15 filter;
+  filter.initialize_with(model);
+  ASSERT_EQ(filter.initialize(std::move(make_estimate(0))).code(), 0);
+
+  const auto steps = static_cast<std::int64_t>(Filter15PluginBase::k_history_limit + 10);
+  for (std::int64_t step = 1; step <= steps; ++step)
+  {
+    rpp_localization::LocalizationFilter15::LocalizationPredictInput15 input;
+    input.referenceTimeNs() = step * 10;
+    input.deltaNs() = 10;
+    input.control().present() = false;
+    ASSERT_EQ(filter.predict(std::move(input)).status().code(), 0);
+  }
+  const auto before = model->prediction_count_;
+  auto recent = make_measurement(steps * 10 - 1, 2.0, 1.0);
+  ASSERT_EQ(filter.correct(std::move(recent)).status().code(), 0);
+  EXPECT_EQ(model->prediction_count_ - before, 2u);
+  EXPECT_EQ(filter.getEstimate().estimate().referenceTimeNs(), steps * 10);
+
+  auto expired = make_measurement(1, 2.0, 1.0);
+  EXPECT_EQ(filter.correct(std::move(expired)).status().code(), 6);
+  EXPECT_EQ(model->prediction_count_ - before, 2u);
 }
 
 }  // namespace

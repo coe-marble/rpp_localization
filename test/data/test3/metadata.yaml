@@ -1,0 +1,38 @@
+rosbag2_bagfile_information:
+  version: 9
+  storage_identifier: mcap
+  duration:
+    nanoseconds: 123033146171
+  starting_time:
+    nanoseconds_since_epoch: 1381518692966203289
+  message_count: 44598
+  topics_with_message_count:
+    - topic_metadata:
+        name: /ardrone/imu
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles:
+          []
+        type_description_hash: ""
+      message_count: 22300
+    - topic_metadata:
+        name: /ardrone/odometry/raw
+        type: nav_msgs/msg/Odometry
+        serialization_format: cdr
+        offered_qos_profiles:
+          []
+        type_description_hash: ""
+      message_count: 22298
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - 0_test3_2026_11_10-16_47_21.mcap
+  files:
+    - path: 0_test3_2026_11_10-16_47_21.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1381518692966203289
+      duration:
+        nanoseconds: 123033146171
+      message_count: 44598
+  custom_data: ~
+  ros_distro: lyrical

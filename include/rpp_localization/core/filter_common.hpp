@@ -83,8 +83,8 @@ const double TAU = 6.283185307179587;
 // the ROS-independent core nanosecond clock.
 struct ControlCommand
 {
-  TimestampNs stamp;
-  ControlVector control;
+  TimestampNs stamp{0};
+  ControlVector control{ControlVector::Zero(TWIST_SIZE)};
 };
 
 struct Measurement

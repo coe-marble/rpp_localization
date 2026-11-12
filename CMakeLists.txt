@@ -40,19 +40,25 @@ set(core_library_name rpp_localization_core)
 set(rpp_interface_dir "$ENV{HOME}/.rpp/interfaces/cpp")
 option(
   RPP_LOCALIZATION_ENABLE_PLUGIN_TESTS
-  "Build tests that require locally generated RPP plugin-type headers"
+  "Build tests that require generated RPP headers and a registered plugin library"
   OFF)
 option(
   RPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS
   "Build launch tests that replay the checked-in localization rosbag"
   OFF)
 
+add_library(rpp_localization_numerics INTERFACE)
+add_library(rpp_localization::numerics ALIAS rpp_localization_numerics)
+set_target_properties(rpp_localization_numerics PROPERTIES EXPORT_NAME numerics)
+target_compile_features(rpp_localization_numerics INTERFACE cxx_std_17)
+target_include_directories(rpp_localization_numerics INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(rpp_localization_numerics INTERFACE Eigen3::Eigen angles::angles)
+
+# Numerical implementations are header-only; retain the shared target for ROS adapters.
 add_library(${core_library_name} SHARED
-  src/core/filter_utilities.cpp
-  src/filters/extended_kalman_filter.cpp
-  src/filters/unscented_kalman_filter.cpp
-  src/models/constant_acceleration_model.cpp
-  src/models/navigation_model_base.cpp
   src/ros/ros_filter.cpp
   src/ros/ros_filter_base.cpp
   src/ros/ros_filter_utilities.cpp
@@ -66,14 +72,13 @@ target_include_directories(${core_library_name}
 )
 target_link_libraries(${core_library_name}
   PUBLIC
-    Eigen3::Eigen
+    rpp_localization::numerics
     rpp_cpp::rpp_cpp
     "${cpp_typesupport_target}"
 )
 target_link_libraries(${core_library_name}
   PUBLIC
     ament_index_cpp::ament_index_cpp
-    angles::angles
     diagnostic_msgs::diagnostic_msgs
     diagnostic_updater::diagnostic_updater
     geometry_msgs::geometry_msgs
@@ -98,12 +103,21 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
   ament_add_gtest(test_core_compatibility test/test_core_compatibility.cpp)
-  target_link_libraries(test_core_compatibility ${core_library_name})
+  target_link_libraries(test_core_compatibility rpp_localization::numerics)
+
+  ament_add_gtest(test_ros_parameters test/test_ros_parameters.cpp)
+  target_link_libraries(test_ros_parameters ${core_library_name})
 
   ament_add_gtest(
     test_constant_acceleration_model_parity
     test/test_constant_acceleration_model_parity.cpp)
-  target_link_libraries(test_constant_acceleration_model_parity ${core_library_name})
+  target_link_libraries(test_constant_acceleration_model_parity rpp_localization::numerics)
+
+  ament_add_gtest(test_numerics_linkage
+    test/test_numerics_linkage.cpp
+    test/numerics_linkage_peer.cpp
+  )
+  target_link_libraries(test_numerics_linkage rpp_localization::numerics)
 
   if(RPP_LOCALIZATION_ENABLE_PLUGIN_TESTS)
     ament_add_gtest(
@@ -115,6 +129,11 @@ if(BUILD_TESTING)
     ament_add_gtest(test_plugin_headers test/test_plugin_headers.cpp)
     target_link_libraries(test_plugin_headers ${core_library_name})
     target_include_directories(test_plugin_headers PRIVATE plugins/filters plugins/models)
+
+    ament_add_gtest(test_localization_lifecycle test/test_localization_lifecycle.cpp)
+    target_link_libraries(test_localization_lifecycle ${core_library_name})
+    target_compile_definitions(test_localization_lifecycle PRIVATE
+      RPP_LOCALIZATION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
   if(RPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS)
@@ -123,7 +142,7 @@ if(BUILD_TESTING)
   endif()
 endif()
 
-install(TARGETS ${core_library_name}
+install(TARGETS ${core_library_name} rpp_localization_numerics
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

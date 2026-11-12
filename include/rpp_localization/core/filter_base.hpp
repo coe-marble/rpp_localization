@@ -4,6 +4,7 @@
 #include "rpp_localization/core/model_base.hpp"
 
 #include <ostream>
+#include <memory>
 #include <stdexcept>
 
 namespace rpp_localization
@@ -30,6 +31,13 @@ public:
 
   virtual void correct(const Measurement& measurement) = 0;
   virtual void predict(TimestampNs reference_time, DurationNs delta) = 0;
+
+  // A checkpoint retains filter internals as well as the externally owned
+  // model state. The model must outlive the original and the copy.
+  virtual std::unique_ptr<FilterBase> clone() const
+  {
+    throw std::logic_error("This filter does not support replay checkpoints");
+  }
 
   [[nodiscard]] ModelBase* get_model()
   {
