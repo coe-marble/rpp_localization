@@ -4,6 +4,8 @@ localization_node:
     # Ekf15 or Ukf15, and the selected filter component owns its model slot.
     script: rpp_localization::localization
     configuration: ekf
+    # Match rpp_control: configure now and optionally wait for RPP activation.
+    controller.activate_on_start: true
 
     frequency: 30.0
     sensor_timeout: 0.1

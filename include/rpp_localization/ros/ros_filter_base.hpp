@@ -32,6 +32,7 @@
 #include "rpp_localization/ros/localization_script.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 #include "rpp_localization/ros/time.hpp"
+#include <rpp_cpp/runtime_fwd.hpp>
 
 namespace rpp_localization
 {
@@ -243,6 +244,7 @@ protected:
   void process_rpp_measurement(const Measurement & measurement);
 
   [[nodiscard]] bool rpp_filter_debug() const noexcept;
+  [[nodiscard]] bool rpp_filter_active() const;
   [[nodiscard]] bool rpp_filter_initialized() const noexcept;
   [[nodiscard]] bool rpp_filter_uses_control() const noexcept;
   [[nodiscard]] const StateVector & rpp_filter_state() const noexcept;
@@ -658,7 +660,7 @@ protected:
   std::unique_ptr<diagnostic_updater::Updater> diagnostic_updater_;
 
   std::string default_configuration_;
-  std::unique_ptr<rpp::ComponentContext> rpp_context_;
+  std::unique_ptr<rpp::ScriptRuntime<>> rpp_runtime_;
   std::unique_ptr<LocalizationScript> rpp_script_;
   std::shared_ptr<LocalizationFilter15> rpp_filter_;
   StateVector rpp_state_;

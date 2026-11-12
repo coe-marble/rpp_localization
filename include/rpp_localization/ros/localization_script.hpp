@@ -24,15 +24,24 @@ public:
   {
   }
 
-  void initialize()
+  void initialize(bool activate_on_start = true)
   {
-    context_.initialize();
-    filter_ = context_.get_component<LocalizationFilter15>("filter");
+    filter_ = context_.get_subcomponent_context("filter").get_instance<LocalizationFilter15>();
     if (!filter_)
     {
       throw std::runtime_error(
         "LocalizationScript requires a LocalizationFilter15 component named 'filter'");
     }
+    if (activate_on_start)
+    {
+      context_.activate_subcomponents().require_success(
+        "LocalizationScript component activation");
+    }
+  }
+
+  [[nodiscard]] bool is_active() const
+  {
+    return context_.get_subcomponent_context("filter").is_active();
   }
 
   [[nodiscard]] const std::shared_ptr<LocalizationFilter15> & filter() const noexcept

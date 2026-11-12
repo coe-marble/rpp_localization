@@ -6,6 +6,7 @@
 #include <rpp_localization/core/filter_common.hpp>
 #include <rpp_localization/models/constant_acceleration_model.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -47,7 +48,7 @@ public:
   ConstantAccelerationModel15() = default;
   ~ConstantAccelerationModel15() override = default;
 
-  void initialize(const rpp::ComponentContext& context) override
+  rpp::CallbackResult on_configure(const rpp::ComponentContext& context) override
   {
     ready_ = false;
     configured_ = false;
@@ -57,7 +58,35 @@ public:
     load_configuration(context);
     apply_configuration();
     configured_ = true;
+    return {};
+  }
+
+  rpp::CallbackResult on_cleanup() override
+  {
+    ready_ = false;
+    configured_ = false;
+    model_.reset();
+    return {};
+  }
+
+  rpp::CallbackResult on_activate() override
+  {
+    if (!configured_ || !model_)
+    {
+      return rpp::CallbackResult::failure(
+        "ConstantAccelerationModel15 must be configured before activation");
+    }
+    model_->reset();
+    model_->initialize_runtime();
+    apply_configuration();
     ready_ = true;
+    return {};
+  }
+
+  rpp::CallbackResult on_deactivate() override
+  {
+    ready_ = false;
+    return {};
   }
 
   void reset() override
@@ -71,7 +100,6 @@ public:
     model_->reset();
     model_->initialize_runtime();
     apply_configuration();
-    ready_ = true;
   }
 
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
@@ -264,9 +292,11 @@ private:
 
     rpp_localization::ControlCommand legacy_control;
     legacy_control.control = rpp_localization::ControlVector::Zero(k_control_size);
+    auto effective_control_config = control_update_vector_;
 
     if (!control.present())
     {
+      std::fill(effective_control_config.begin(), effective_control_config.end(), false);
       if (!can_subtract(reference_time, control_timeout_ns_))
       {
         return false;
@@ -285,12 +315,17 @@ private:
       legacy_control.stamp = control.stampNs();
       for (std::size_t index = 0; index < k_control_size; ++index)
       {
+        effective_control_config[index] = effective_control_config[index] && enabled[index];
         legacy_control.control(static_cast<Eigen::Index>(index)) = enabled[index] ?
           values[index] :
           state(rpp_localization::POSITION_V_OFFSET + static_cast<Eigen::Index>(index));
       }
     }
 
+    // A disabled axis must preserve measured acceleration, rather than replacing
+    // it with zero control acceleration during prediction.
+    model_->set_control_params(effective_control_config, control_timeout_ns_,
+      acceleration_limits_, acceleration_gains_, deceleration_limits_, deceleration_gains_);
     model_->set_control(legacy_control);
     return true;
   }

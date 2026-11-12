@@ -27,9 +27,6 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/qos.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/filters/extended_kalman_filter.hpp"
-#include "rpp_localization/models/constant_acceleration_model.hpp"
-#include "rpp_localization/filters/unscented_kalman_filter.hpp"
 #include "rpp_localization/core/filter_common.hpp"
 #include "rpp_localization/core/filter_utilities.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
@@ -221,7 +218,7 @@ void RosFilter::load_params()
   std::vector<CallbackData> acc_callback_data_v;
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&, const CallbackData&)>
-  on_registered_odom = [this](const std::string& topic_name, const std::string& topic, int queue_size,
+  on_registered_odom = [this](const std::string& topic, const std::string& topic_name, int queue_size,
       const CallbackData& pose_callback_data, const CallbackData& twist_callback_data)
   {
     std::function<void(const std::shared_ptr<nav_msgs::msg::Odometry>)>
@@ -295,7 +292,7 @@ void RosFilter::load_params()
 
 
   std::function<void(const std::string&, const std::string&, int, const CallbackData&, const CallbackData&, const CallbackData&)>
-  on_registered_imu = [this](const std::string& topic_name, const std::string& topic, int queue_size,
+  on_registered_imu = [this](const std::string& topic, const std::string& topic_name, int queue_size,
       const CallbackData& pose_callback_data, const CallbackData& twist_callback_data, const CallbackData& acc_callback_data)
   {
     std::function<void(const std::shared_ptr<sensor_msgs::msg::Imu>)>
@@ -311,9 +308,8 @@ void RosFilter::load_params()
 
   };
 
-  auto control_update_vector = this->rpp_filter_control_update_vector();
   ros_filter_utilities::handle_imu_params(*shared_this,
-    &this->_debug_stream, control_update_vector,
+    &this->_debug_stream, this->rpp_control_update_vector_,
     this->remove_gravitational_acceleration_,
     pose_callback_data_v,
     twist_callback_data_v,
@@ -335,6 +331,12 @@ void RosFilter::load_params()
 
 void RosFilter::periodic_update()
 {
+  // A configured filter may be waiting for external RPP activation.
+  if (!this->rpp_filter_active()) {
+    this->clear_measurement_queue();
+    return;
+  }
+
   // Wait for the filter to be enabled
   if (!this->enabled_) {
     RCLCPP_INFO_ONCE(
@@ -344,6 +346,7 @@ void RosFilter::periodic_update()
     return;
   }
 
+  const auto wall_start = std::chrono::steady_clock::now();
   rclcpp::Time cur_time = this->now();
 
   if (this->toggled_on_) {
@@ -516,10 +519,13 @@ void RosFilter::periodic_update()
 
   // Warn the user if the update took too long
   const double loop_elapsed = (this->now() - cur_time).seconds();
+  const double wall_elapsed = std::chrono::duration<double>(
+    std::chrono::steady_clock::now() - wall_start).count();
   if (loop_elapsed > 1. / this->frequency_) {
     RCLCPP_ERROR_STREAM(
       this->get_logger(),
-      "Failed to meet update rate! Took " << std::setprecision(20) << loop_elapsed << "seconds. "
+      "Failed to meet update rate! Took " << std::setprecision(6) << loop_elapsed <<
+        " s in ROS time (" << wall_elapsed << " s wall time). "
         "Try decreasing the rate, limiting sensor output frequency, or limiting the number of "
         "sensors.");
   }

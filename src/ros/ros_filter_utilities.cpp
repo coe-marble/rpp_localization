@@ -2,6 +2,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -137,7 +138,6 @@ void tf_to_state(const tf2::Transform & state_tf, Eigen::VectorXd & state)
 
 void load_covariance_parameter(rclcpp::Node& node, const std::string & parameter, Eigen::MatrixXd & covariance)
 {
-  covariance.setZero();
   std::vector<double> covar_flat;
 
   if (!node.has_parameter(parameter))
@@ -145,13 +145,16 @@ void load_covariance_parameter(rclcpp::Node& node, const std::string & parameter
     node.declare_parameter(parameter, rclcpp::PARAMETER_DOUBLE_ARRAY);
   }
   if (node.get_parameter(parameter, covar_flat)) {
+    Eigen::MatrixXd candidate(STATE_SIZE, STATE_SIZE);
     if (covar_flat.size() == STATE_SIZE) {
       RCLCPP_INFO_STREAM(
         node.get_logger(), "Detected a " << parameter << " parameter with "
           "length " << STATE_SIZE << ". Assuming diagonal values specified.");
-      covariance.diagonal() = Eigen::VectorXd::Map(covar_flat.data(), STATE_SIZE);
-    } else if (covariance.size() == STATE_SIZE * STATE_SIZE) {
-      covariance = Eigen::MatrixXd::Map(covar_flat.data(), STATE_SIZE, STATE_SIZE);
+      candidate.setZero();
+      candidate.diagonal() = Eigen::VectorXd::Map(covar_flat.data(), STATE_SIZE);
+    } else if (covar_flat.size() == STATE_SIZE * STATE_SIZE) {
+      using RowMajorMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+      candidate = Eigen::Map<const RowMajorMatrix>(covar_flat.data(), STATE_SIZE, STATE_SIZE);
     } else {
       std::string error = "Invalid " + parameter + " specified. Expected a length of " +
         std::to_string(STATE_SIZE) + " or " + std::to_string(STATE_SIZE * STATE_SIZE) +
@@ -159,6 +162,10 @@ void load_covariance_parameter(rclcpp::Node& node, const std::string & parameter
       RCLCPP_FATAL_STREAM(node.get_logger(), error);
       throw std::invalid_argument(error);
     }
+    if (!candidate.allFinite() || (candidate.diagonal().array() < 0.0).any()) {
+      throw std::invalid_argument(parameter + " must be finite with a non-negative diagonal");
+    }
+    covariance = candidate;
   }
 }
 
@@ -712,6 +719,11 @@ std::vector<bool> load_update_config(rclcpp::Node& node, const std::string & top
   const std::string topic_config_name = topic_name + "_config";
 
   update_vector = node.declare_parameter(topic_config_name, update_vector);
+  if (update_vector.size() != static_cast<std::size_t>(STATE_SIZE)) {
+    throw std::invalid_argument(topic_config_name + " must contain exactly " +
+      std::to_string(STATE_SIZE) + " boolean values; received " +
+      std::to_string(update_vector.size()));
+  }
 
   return update_vector;
 }

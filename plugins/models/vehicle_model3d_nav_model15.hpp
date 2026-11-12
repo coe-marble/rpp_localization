@@ -51,22 +51,56 @@ public:
   VehicleModel3DNavModel15() = default;
   ~VehicleModel3DNavModel15() override = default;
 
-  void initialize(const rpp::ComponentContext& context) override
+  rpp::CallbackResult on_configure(const rpp::ComponentContext& context) override
   {
     ready_ = false;
     load_configuration(context);
-    vehicle_model_ = context.get_component<more_dynamics::VehicleModel3D>("vehicle_model");
+    vehicle_model_ =
+      context.get_subcomponent_context("vehicle_model").get_instance<more_dynamics::VehicleModel3D>();
     if (!vehicle_model_)
     {
       throw std::invalid_argument("VehicleModel3D component is required");
     }
-    ready_ = true;
+    context_ = &context;
+    return {};
   }
 
-  void reset() override
+  rpp::CallbackResult on_cleanup() override
   {
-    ready_ = vehicle_model_ != nullptr;
+    ready_ = false;
+    vehicle_model_.reset();
+    context_ = nullptr;
+    return {};
   }
+
+  rpp::CallbackResult on_activate() override
+  {
+    if (!context_ || !vehicle_model_)
+    {
+      return rpp::CallbackResult::failure(
+        "VehicleModel3DNavModel15 must be configured before activation");
+    }
+    auto result = context_->get_subcomponent_context("vehicle_model").activate();
+    if (!result.success)
+    {
+      return result;
+    }
+    ready_ = true;
+    return {};
+  }
+
+  rpp::CallbackResult on_deactivate() override
+  {
+    ready_ = false;
+    if (!context_)
+    {
+      return rpp::CallbackResult::failure(
+        "VehicleModel3DNavModel15 must be configured before deactivation");
+    }
+    return context_->get_subcomponent_context("vehicle_model").deactivate().result;
+  }
+
+  void reset() override {}
 
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
@@ -525,6 +559,7 @@ private:
   }
 
   std::shared_ptr<more_dynamics::VehicleModel3D> vehicle_model_;
+  const rpp::ComponentContext* context_{nullptr};
   std::vector<std::int64_t> command_sizes_;
   std::vector<std::int64_t> control_command_indices_;
   std::vector<std::int64_t> control_data_indices_;

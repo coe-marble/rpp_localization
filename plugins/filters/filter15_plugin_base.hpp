@@ -28,13 +28,63 @@ public:
   static constexpr std::size_t k_state_size = rpp_localization::STATE_SIZE;
   static constexpr std::size_t k_control_size = rpp_localization::TWIST_SIZE;
   static constexpr std::size_t k_covariance_size = k_state_size * k_state_size;
+  static constexpr std::size_t k_history_limit = 512;
 
   Filter15PluginBase() = default;
   ~Filter15PluginBase() override = default;
 
-  void initialize(const rpp::ComponentContext& context) override
+  rpp::CallbackResult on_configure(const rpp::ComponentContext& context) override
   {
-    initialize_with_model(context.get_component<rpp_localization::NavModel15>("model"));
+    context_ = &context;
+    initialize_with_model(
+      context.get_subcomponent_context("model").get_instance<rpp_localization::NavModel15>());
+    return {};
+  }
+
+  rpp::CallbackResult on_cleanup() override
+  {
+    filter_.reset();
+    filter_ready_ = false;
+    reference_time_ = 0;
+    initial_reference_time_ = 0;
+    history_.clear();
+    initial_checkpoint_ = {};
+    model_runtime_.reset();
+    model_component_.reset();
+    context_ = nullptr;
+    component_ready_ = false;
+    return {};
+  }
+
+  rpp::CallbackResult on_activate() override
+  {
+    if (!context_ || !component_ready_ || !model_runtime_)
+    {
+      return rpp::CallbackResult::failure(
+        "LocalizationFilter15 must be configured before activation");
+    }
+
+    auto result = context_->get_subcomponent_context("model").activate();
+    if (!result.success)
+    {
+      return result;
+    }
+    reset();
+    return {};
+  }
+
+  rpp::CallbackResult on_deactivate() override
+  {
+    filter_.reset();
+    filter_ready_ = false;
+    history_.clear();
+    initial_checkpoint_ = {};
+    if (!context_)
+    {
+      return rpp::CallbackResult::failure(
+        "LocalizationFilter15 must be configured before deactivation");
+    }
+    return context_->get_subcomponent_context("model").deactivate().result;
   }
 
   void reset() override
@@ -44,6 +94,7 @@ public:
     reference_time_ = 0;
     initial_reference_time_ = 0;
     history_.clear();
+    initial_checkpoint_ = {};
     if (model_runtime_)
     {
       model_runtime_->reset_runtime();
@@ -85,11 +136,10 @@ public:
       return status;
     }
 
-    initial_state_ = std::move(state);
-    initial_covariance_ = std::move(covariance);
     reference_time_ = initial_estimate.referenceTimeNs();
     initial_reference_time_ = reference_time_;
     history_.clear();
+    initial_checkpoint_ = capture_checkpoint();
     filter_ready_ = true;
     set_status(status, k_ok, "");
     return status;
@@ -126,6 +176,8 @@ public:
 
     const PredictionEvent prediction{
       input.referenceTimeNs(), input.deltaNs(), read_control(input_control)};
+    const auto previous_filter = history_.empty() ? initial_checkpoint_.filter :
+      history_.back().checkpoint.filter;
     const auto previous_state = model_runtime_->get_state();
     const auto previous_covariance = model_runtime_->get_state_covariance();
     const auto previous_control = model_runtime_->get_control_input();
@@ -136,6 +188,7 @@ public:
     catch (const rpp_localization::plugins::detail::ModelPredictionError& error)
     {
       restore_runtime(previous_state, previous_covariance, previous_control);
+      filter_ = previous_filter->clone();
       write_current_estimate(result);
       set_result_status(result, error.code(), error.what());
       return result;
@@ -143,6 +196,7 @@ public:
     catch (const std::exception& error)
     {
       restore_runtime(previous_state, previous_covariance, previous_control);
+      filter_ = previous_filter->clone();
       write_current_estimate(result);
       set_result_status(result, k_model_failure, error.what());
       return result;
@@ -151,13 +205,14 @@ public:
     if (!has_valid_state_and_covariance())
     {
       restore_runtime(previous_state, previous_covariance, previous_control);
+      filter_ = previous_filter->clone();
       write_current_estimate(result);
       set_result_status(result, k_numerical_failure, "prediction produced an invalid estimate");
       return result;
     }
 
-    history_.push_back(HistoryEvent::prediction(prediction));
     reference_time_ = prediction.reference_time;
+    append_history(HistoryEvent::prediction(prediction));
     write_current_estimate(result);
     set_result_status(result, k_ok, "");
     return result;
@@ -253,6 +308,7 @@ protected:
     reference_time_ = 0;
     initial_reference_time_ = 0;
     history_.clear();
+    initial_checkpoint_ = {};
   }
 
   virtual std::unique_ptr<rpp_localization::FilterBase> create_filter(
@@ -270,6 +326,14 @@ private:
     rpp_localization::TimestampNs reference_time;
     rpp_localization::DurationNs delta;
     rpp_localization::plugins::detail::ModelControl control;
+  };
+
+  struct Checkpoint
+  {
+    rpp_localization::StateVector state;
+    rpp_localization::CovarianceMatrix covariance;
+    rpp_localization::plugins::detail::ModelControl control;
+    std::shared_ptr<const rpp_localization::FilterBase> filter;
   };
 
   struct HistoryEvent
@@ -302,6 +366,7 @@ private:
       return {Kind::k_measurement, input.time_, {}, std::move(input)};
     }
 
+    Checkpoint checkpoint;
     Kind kind;
     rpp_localization::TimestampNs time;
     PredictionEvent prediction_input;
@@ -464,6 +529,8 @@ private:
 
   bool apply_current_measurement(const rpp_localization::Measurement& measurement)
   {
+    const auto previous_filter = history_.empty() ? initial_checkpoint_.filter :
+      history_.back().checkpoint.filter;
     const auto previous_state = model_runtime_->get_state();
     const auto previous_covariance = model_runtime_->get_state_covariance();
     try
@@ -474,16 +541,18 @@ private:
     {
       model_runtime_->set_state(previous_state);
       model_runtime_->set_state_covariance(previous_covariance);
+      filter_ = previous_filter->clone();
       return false;
     }
     if (!has_valid_state_and_covariance())
     {
       model_runtime_->set_state(previous_state);
       model_runtime_->set_state_covariance(previous_covariance);
+      filter_ = previous_filter->clone();
       return false;
     }
 
-    history_.push_back(HistoryEvent::measurement(measurement));
+    append_history(HistoryEvent::measurement(measurement));
     return true;
   }
 
@@ -503,7 +572,14 @@ private:
       });
     const auto insertion_index = static_cast<std::size_t>(
       std::distance(history_.begin(), insertion));
-    history_.insert(insertion, HistoryEvent::measurement(measurement));
+    // Keep committed checkpoints untouched until the entire replay succeeds.
+    auto replay_history = history_;
+    replay_history.insert(replay_history.begin() + static_cast<std::ptrdiff_t>(insertion_index),
+      HistoryEvent::measurement(measurement));
+    const auto checkpoint = insertion_index == 0 ? initial_checkpoint_ :
+      history_[insertion_index - 1].checkpoint;
+    const auto checkpoint_time = insertion_index == 0 ? initial_reference_time_ :
+      history_[insertion_index - 1].time;
 
     const auto previous_state = model_runtime_->get_state();
     const auto previous_covariance = model_runtime_->get_state_covariance();
@@ -513,19 +589,12 @@ private:
 
     try
     {
-      model_runtime_->set_state(initial_state_);
-      model_runtime_->set_state_covariance(initial_covariance_);
-      model_runtime_->set_control(rpp_localization::plugins::detail::ModelControl{});
-      auto replay_filter = create_filter(*model_runtime_);
-      if (!replay_filter)
+      restore_runtime(checkpoint.state, checkpoint.covariance, checkpoint.control);
+      filter_ = checkpoint.filter->clone();
+      reference_time_ = checkpoint_time;
+      for (std::size_t index = insertion_index; index < replay_history.size(); ++index)
       {
-        throw std::runtime_error("filter factory returned no runtime filter during replay");
-      }
-
-      reference_time_ = initial_reference_time_;
-      for (std::size_t index = 0; index < history_.size(); ++index)
-      {
-        const auto& event = history_[index];
+        auto& event = replay_history[index];
         if (event.kind == HistoryEvent::Kind::k_prediction)
         {
           if (event.time < reference_time_)
@@ -533,7 +602,7 @@ private:
             throw std::runtime_error("prediction history is not chronological");
           }
           model_runtime_->set_control(event.prediction_input.control);
-          replay_filter->predict(event.time, event.time - reference_time_);
+          filter_->predict(event.time, event.time - reference_time_);
           reference_time_ = event.time;
         }
         else
@@ -544,30 +613,31 @@ private:
           }
           if (event.time > reference_time_)
           {
-            const auto prediction = find_covering_prediction(index, event.time);
+            const auto prediction = find_covering_prediction(replay_history, index, event.time);
             if (prediction == nullptr)
             {
               throw std::runtime_error("no prediction interval covers the stale measurement");
             }
             model_runtime_->set_control(prediction->control);
-            replay_filter->predict(event.time, event.time - reference_time_);
+            filter_->predict(event.time, event.time - reference_time_);
             reference_time_ = event.time;
           }
-          replay_filter->correct(event.measurement_input);
+          filter_->correct(event.measurement_input);
         }
 
         if (!has_valid_state_and_covariance())
         {
           throw std::runtime_error("replay produced an invalid estimate");
         }
+        event.checkpoint = capture_checkpoint();
       }
 
-      filter_ = std::move(replay_filter);
+      history_ = std::move(replay_history);
+      prune_history();
       return true;
     }
     catch (const std::exception&)
     {
-      history_.erase(history_.begin() + static_cast<std::ptrdiff_t>(insertion_index));
       restore_runtime(previous_state, previous_covariance, previous_control);
       reference_time_ = previous_reference_time;
       filter_ = std::move(previous_filter);
@@ -575,19 +645,45 @@ private:
     }
   }
 
-  const PredictionEvent* find_covering_prediction(
+  static const PredictionEvent* find_covering_prediction(
+    const std::vector<HistoryEvent>& history,
     const std::size_t from_index,
-    const rpp_localization::TimestampNs timestamp) const
+    const rpp_localization::TimestampNs timestamp)
   {
-    for (std::size_t index = from_index; index < history_.size(); ++index)
+    for (std::size_t index = from_index; index < history.size(); ++index)
     {
-      const auto& event = history_[index];
+      const auto& event = history[index];
       if (event.kind == HistoryEvent::Kind::k_prediction && event.time >= timestamp)
       {
         return &event.prediction_input;
       }
     }
     return nullptr;
+  }
+
+  Checkpoint capture_checkpoint() const
+  {
+    return {model_runtime_->get_state(), model_runtime_->get_state_covariance(),
+      model_runtime_->get_control_input(), filter_->clone()};
+  }
+
+  void append_history(HistoryEvent event)
+  {
+    event.checkpoint = capture_checkpoint();
+    history_.push_back(std::move(event));
+    prune_history();
+  }
+
+  void prune_history()
+  {
+    if (history_.size() <= k_history_limit)
+    {
+      return;
+    }
+    const auto count = history_.size() - k_history_limit;
+    initial_checkpoint_ = history_[count - 1].checkpoint;
+    initial_reference_time_ = history_[count - 1].time;
+    history_.erase(history_.begin(), history_.begin() + static_cast<std::ptrdiff_t>(count));
   }
 
   [[nodiscard]] bool has_valid_state_and_covariance() const
@@ -684,11 +780,11 @@ private:
   std::shared_ptr<rpp_localization::NavModel15> model_component_;
   std::unique_ptr<rpp_localization::plugins::detail::NavModel15Adapter> model_runtime_;
   std::unique_ptr<rpp_localization::FilterBase> filter_;
-  rpp_localization::StateVector initial_state_;
-  rpp_localization::CovarianceMatrix initial_covariance_;
+  Checkpoint initial_checkpoint_;
   std::vector<HistoryEvent> history_;
   rpp_localization::TimestampNs reference_time_{0};
   rpp_localization::TimestampNs initial_reference_time_{0};
+  const rpp::ComponentContext* context_{nullptr};
   bool component_ready_{false};
   bool filter_ready_{false};
 };

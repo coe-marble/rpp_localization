@@ -5,12 +5,16 @@
 #ifndef RPP_LOCALIZATION__FILTER_UTILITIES_HPP_
 #define RPP_LOCALIZATION__FILTER_UTILITIES_HPP_
 
+#include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <ostream>
 #include <string>
 #include <vector>
 
 #include "Eigen/Dense"
+#include "angles/angles.h"
+#include "rpp_localization/core/filter_common.hpp"
 
 #define FB_DEBUG(msg) \
   if (get_debug()) { \
@@ -55,7 +59,7 @@ inline void append_prefix(const std::string & tf_prefix, std::string & frame_id)
 
 bool check_mahalanobis_threshold(
   const Eigen::VectorXd & innovation,
-  const Eigen::MatrixXd & innovation_covariance,
+  const Eigen::MatrixXd & inverse_innovation_covariance,
   double n_sigmas);
 
 /**
@@ -65,5 +69,102 @@ void wrap_state_angles(Eigen::VectorXd& state);
 
 }  // namespace filter_utilities
 }  // namespace rpp_localization
+
+inline std::ostream & operator<<(std::ostream & os, const Eigen::MatrixXd & mat)
+{
+  os << "[";
+
+  int row_count = static_cast<int>(mat.rows());
+
+  for (int row = 0; row < row_count; ++row) {
+    if (row > 0) {
+      os << " ";
+    }
+
+    for (int col = 0; col < mat.cols(); ++col) {
+      os << std::setiosflags(std::ios::left) << std::setw(12) <<
+        std::setprecision(5) << mat(row, col);
+    }
+
+    if (row < row_count - 1) {
+      os << "\n";
+    }
+  }
+
+  os << "]\n";
+
+  return os;
+}
+
+inline std::ostream & operator<<(std::ostream & os, const Eigen::VectorXd & vec)
+{
+  os << "[";
+  for (int dim = 0; dim < vec.rows(); ++dim) {
+    os << std::setiosflags(std::ios::left) << std::setw(12) <<
+      std::setprecision(5) << vec(dim);
+  }
+  os << "]\n";
+
+  return os;
+}
+
+inline std::ostream & operator<<(std::ostream & os, const std::vector<size_t> & vec)
+{
+  os << "[";
+  for (size_t dim = 0; dim < vec.size(); ++dim) {
+    os << std::setiosflags(std::ios::left) << std::setw(12) <<
+      std::setprecision(5) << vec[dim];
+  }
+  os << "]\n";
+
+  return os;
+}
+
+inline std::ostream & operator<<(std::ostream & os, const std::vector<int> & vec)
+{
+  os << "[";
+  for (size_t dim = 0; dim < vec.size(); ++dim) {
+    os << std::setiosflags(std::ios::left) << std::setw(3) <<
+      (vec[dim] ? "t" : "f");
+  }
+  os << "]\n";
+
+  return os;
+}
+
+namespace rpp_localization
+{
+namespace filter_utilities
+{
+
+
+inline bool check_mahalanobis_threshold(
+  const Eigen::VectorXd & innovation,
+  const Eigen::MatrixXd & inverse_innovation_covariance,
+  double n_sigmas)
+{
+  if (std::isnan(n_sigmas) || n_sigmas < 0.0 ||
+    inverse_innovation_covariance.rows() != innovation.size() ||
+    inverse_innovation_covariance.cols() != innovation.size())
+  {
+    return false;
+  }
+  const double squared_mahalanobis =
+    innovation.dot(inverse_innovation_covariance * innovation);
+  return std::isfinite(squared_mahalanobis) && squared_mahalanobis >= 0.0 &&
+    std::sqrt(squared_mahalanobis) < n_sigmas;
+}
+
+inline void wrap_state_angles(Eigen::VectorXd& state)
+{
+  using namespace rpp_localization;
+  state(StateMemberRoll) = angles::normalize_angle(state(StateMemberRoll));
+  state(StateMemberPitch) = angles::normalize_angle(state(StateMemberPitch));
+  state(StateMemberYaw) = angles::normalize_angle(state(StateMemberYaw));
+}
+
+}
+
+}
 
 #endif  // RPP_LOCALIZATION__FILTER_UTILITIES_HPP_
