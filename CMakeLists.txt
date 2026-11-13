@@ -15,6 +15,7 @@ find_package(angles REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(rpp_cpp REQUIRED)
+find_package(rpp_ros2 REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(diagnostic_updater REQUIRED)
@@ -74,6 +75,7 @@ target_link_libraries(${core_library_name}
   PUBLIC
     rpp_localization::numerics
     rpp_cpp::rpp_cpp
+    rpp_ros2::rpp_ros2
     "${cpp_typesupport_target}"
 )
 target_link_libraries(${core_library_name}
@@ -166,7 +168,7 @@ install(FILES plugins.json DESTINATION share/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
-  ament_index_cpp angles Eigen3 rpp_cpp rclcpp diagnostic_msgs diagnostic_updater geometry_msgs
+  ament_index_cpp angles Eigen3 rpp_cpp rpp_ros2 rclcpp diagnostic_msgs diagnostic_updater geometry_msgs
   nav_msgs sensor_msgs std_msgs std_srvs tf2 tf2_geometry_msgs tf2_ros
   rosidl_default_runtime
 )
