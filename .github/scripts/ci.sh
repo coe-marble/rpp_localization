@@ -8,7 +8,7 @@ for package in rpp_common rpp_plugin_registrator rpp_orchestrator rpp_py rpp_cli
   python -m pip install --no-deps -e "rpp_dev/src/$package"
 done
 
-colcon build --base-paths rpp_dev/src/rpp_cpp \
+colcon build --base-paths rpp_dev/src/rpp_cpp rpp_dev/src/rpp_ros2 \
   --symlink-install --cmake-args -DBUILD_TESTING=OFF \
   -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python
 source install/setup.bash

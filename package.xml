@@ -13,6 +13,7 @@
   <depend>angles</depend>
   <depend>eigen</depend>
   <depend>rpp_cpp</depend>
+  <depend>rpp_ros2</depend>
   <depend>rclcpp</depend>
   <depend>diagnostic_msgs</depend>
   <depend>diagnostic_updater</depend>

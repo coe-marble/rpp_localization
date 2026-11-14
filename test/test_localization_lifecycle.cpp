@@ -104,7 +104,6 @@ TEST(LocalizationLifecycle, ScriptCanWaitForExternalActivationOrActivateByDefaul
       script.initialize(false);
     }
 
-    ASSERT_NE(script.filter(), nullptr);
     EXPECT_EQ(script.is_active(), activate_on_start);
     const auto & filter_context = runtime.get_context().get_subcomponent_context("filter");
     if (!activate_on_start)
@@ -113,8 +112,15 @@ TEST(LocalizationLifecycle, ScriptCanWaitForExternalActivationOrActivateByDefaul
       EXPECT_TRUE(script.is_active());
     }
 
-    EXPECT_EQ(script.filter()->initialize(std::move(make_estimate())).code(), 0);
-    EXPECT_EQ(script.filter()->predict(std::move(make_prediction())).status().code(), 0);
+    {
+      // Obtain the active filter only when it is needed. LocalizationScript no
+      // longer retains a component instance across slot lifecycle operations.
+      const auto filter = runtime.get_context().get_active_component<
+        rpp_localization::LocalizationFilter15>("filter");
+      ASSERT_TRUE(static_cast<bool>(filter));
+      EXPECT_EQ(filter->initialize(std::move(make_estimate())).code(), 0);
+      EXPECT_EQ(filter->predict(std::move(make_prediction())).status().code(), 0);
+    }
     ASSERT_TRUE(filter_context.deactivate().result.success);
     EXPECT_FALSE(script.is_active());
     ASSERT_TRUE(runtime.cleanup().success);
