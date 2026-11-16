@@ -33,6 +33,7 @@
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 #include "rpp_localization/ros/time.hpp"
 #include <rpp_cpp/runtime_fwd.hpp>
+#include <rpp_ros2/slot_manager_ros.hpp>
 
 namespace rpp_localization
 {
@@ -240,7 +241,12 @@ protected:
   void initialize_rpp_filter();
   void reset_rpp_filter();
   void correct_rpp_filter(const Measurement & measurement);
-  void predict_rpp_filter(TimestampNs reference_time, DurationNs delta);
+  [[nodiscard]] bool predict_rpp_filter(TimestampNs reference_time, DurationNs delta);
+  [[nodiscard]] bool apply_estimate(
+    const LocalizationFilter15::Estimate15::Const & estimate,
+    StateVector & state,
+    CovarianceMatrix & covariance,
+    std::string & error);
   void process_rpp_measurement(const Measurement & measurement);
 
   [[nodiscard]] bool rpp_filter_debug() const noexcept;
@@ -661,10 +667,15 @@ protected:
 
   std::string default_configuration_;
   std::unique_ptr<rpp::ScriptRuntime<>> rpp_runtime_;
+  // Declared after the runtime so it is destroyed first and never outlives it.
+  std::unique_ptr<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime<>>> rpp_slot_manager_ros_;
   std::unique_ptr<LocalizationScript> rpp_script_;
-  std::shared_ptr<LocalizationFilter15> rpp_filter_;
   StateVector rpp_state_;
   CovarianceMatrix rpp_covariance_;
+  // Reused transaction buffers for plugin estimates. A valid candidate swaps
+  // with the live estimate; an invalid one is overwritten by the next result.
+  StateVector rpp_candidate_state_;
+  CovarianceMatrix rpp_candidate_covariance_;
   ControlCommand rpp_control_;
   std::vector<bool> rpp_control_update_vector_;
   rclcpp::Duration rpp_sensor_timeout_;

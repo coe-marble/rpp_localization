@@ -26,8 +26,7 @@ public:
 
   void initialize(bool activate_on_start = true)
   {
-    filter_ = context_.get_subcomponent_context("filter").get_instance<LocalizationFilter15>();
-    if (!filter_)
+    if (!context_.get_subcomponent_context("filter").get_instance<LocalizationFilter15>())
     {
       throw std::runtime_error(
         "LocalizationScript requires a LocalizationFilter15 component named 'filter'");
@@ -41,17 +40,11 @@ public:
 
   [[nodiscard]] bool is_active() const
   {
-    return context_.get_subcomponent_context("filter").is_active();
-  }
-
-  [[nodiscard]] const std::shared_ptr<LocalizationFilter15> & filter() const noexcept
-  {
-    return filter_;
+    return static_cast<bool>(context_.get_active_component<LocalizationFilter15>("filter"));
   }
 
 private:
   const rpp::ComponentContext & context_;
-  std::shared_ptr<LocalizationFilter15> filter_;
 };
 
 }  // namespace rpp_localization

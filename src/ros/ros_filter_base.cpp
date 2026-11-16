@@ -2368,29 +2368,27 @@ ScriptReference parse_script_reference(const std::string & reference)
     reference.substr(separator + 2)};
 }
 
-void require_valid_state(const Eigen::VectorXd & state)
+bool require_valid_state(const Eigen::VectorXd & state)
 {
-  if (state.size() != STATE_SIZE || !state.allFinite())
-  {
-    throw std::invalid_argument("state must contain 15 finite values");
-  }
+  return state.size() == STATE_SIZE && state.allFinite();
 }
 
-void require_valid_covariance(const Eigen::MatrixXd & covariance)
+bool require_valid_covariance(const Eigen::MatrixXd & covariance)
 {
   if (covariance.rows() != STATE_SIZE || covariance.cols() != STATE_SIZE ||
     !covariance.allFinite())
   {
-    throw std::invalid_argument("covariance must be a finite 15 by 15 matrix");
+    return false;
   }
 
   for (Eigen::Index index = 0; index < covariance.rows(); ++index)
   {
     if (covariance(index, index) < 0.0)
     {
-      throw std::invalid_argument("covariance diagonal entries must be non-negative");
+      return false;
     }
   }
+  return true;
 }
 
 template<typename Status>
@@ -2407,9 +2405,6 @@ LocalizationFilter15::Estimate15 make_estimate(
   const CovarianceMatrix & covariance,
   const TimestampNs reference_time)
 {
-  require_valid_state(state);
-  require_valid_covariance(covariance);
-
   LocalizationFilter15::Estimate15 estimate;
   auto state_values = estimate.state().values();
   state_values.resize(STATE_SIZE);
@@ -2434,17 +2429,6 @@ LocalizationFilter15::Estimate15 make_estimate(
 
 LocalizationFilter15::Measurement15 make_measurement(const Measurement & measurement)
 {
-  require_valid_state(measurement.measurement_);
-  if (measurement.covariance_.rows() != STATE_SIZE ||
-    measurement.covariance_.cols() != STATE_SIZE || !measurement.covariance_.allFinite())
-  {
-    throw std::invalid_argument("measurement covariance must be a finite 15 by 15 matrix");
-  }
-  if (measurement.update_vector_.size() != static_cast<std::size_t>(STATE_SIZE))
-  {
-    throw std::invalid_argument("measurement update vector must contain 15 values");
-  }
-
   LocalizationFilter15::Measurement15 output;
   auto state_values = output.state().values();
   state_values.resize(STATE_SIZE);
@@ -2506,40 +2490,50 @@ LocalizationFilter15::LocalizationPredictInput15 make_prediction_input(
   return input;
 }
 
-void apply_estimate(
+}  // namespace
+
+bool RosFilterBase::apply_estimate(
   const LocalizationFilter15::Estimate15::Const & estimate,
   StateVector & state,
-  CovarianceMatrix & covariance)
+  CovarianceMatrix & covariance,
+  std::string & error)
 {
   const auto state_values = estimate.state().values();
   const auto covariance_values = estimate.covariance().values();
   if (state_values.size() != STATE_SIZE ||
     covariance_values.size() != static_cast<std::size_t>(STATE_SIZE * STATE_SIZE))
   {
-    throw std::runtime_error("RPP filter returned an estimate with an invalid shape");
+    error = "RPP filter returned an estimate with an invalid shape";
+    return false;
   }
-
-  state.resize(STATE_SIZE);
-  covariance.resize(STATE_SIZE, STATE_SIZE);
   for (Eigen::Index row = 0; row < STATE_SIZE; ++row)
   {
-    state(row) = state_values[static_cast<std::size_t>(row)];
+    rpp_candidate_state_(row) = state_values[static_cast<std::size_t>(row)];
     for (Eigen::Index column = 0; column < STATE_SIZE; ++column)
     {
-      covariance(row, column) =
+      rpp_candidate_covariance_(row, column) =
         covariance_values[static_cast<std::size_t>(row * STATE_SIZE + column)];
     }
   }
-  require_valid_state(state);
-  require_valid_covariance(covariance);
+  if (!require_valid_state(rpp_candidate_state_))
+  {
+    error = "state must contain 15 finite values";
+    return false;
+  }
+  if (!require_valid_covariance(rpp_candidate_covariance_))
+  {
+    error = "covariance must be a finite 15 by 15 matrix with non-negative diagonal";
+    return false;
+  }
+  state.swap(rpp_candidate_state_);
+  covariance.swap(rpp_candidate_covariance_);
+  return true;
 }
-
-}  // namespace
 
 void RosFilterBase::initialize_rpp_filter()
 {
   reset_rpp_filter();
-  rpp_filter_.reset();
+  rpp_slot_manager_ros_.reset();
   rpp_script_.reset();
   rpp_runtime_.reset();
   rpp_use_control_ = declare_parameter("use_control", false);
@@ -2552,7 +2546,11 @@ void RosFilterBase::initialize_rpp_filter()
 
   ros_filter_utilities::load_covariance_parameter(
     *this, "initial_estimate_covariance", rpp_covariance_);
-  require_valid_covariance(rpp_covariance_);
+  if (!require_valid_covariance(rpp_covariance_))
+  {
+    throw std::invalid_argument(
+      "initial_estimate_covariance must be a finite 15 by 15 matrix with non-negative diagonal");
+  }
 
   const auto script_reference = declare_parameter<std::string>(
     "script", "rpp_localization::localization");
@@ -2575,11 +2573,10 @@ void RosFilterBase::initialize_rpp_filter()
   rpp_runtime_->configure().require_success("Localization script configuration");
   rpp_script_ = std::make_unique<LocalizationScript>(rpp_runtime_->get_context());
   rpp_script_->initialize(activate_on_start);
-  rpp_filter_ = rpp_script_->filter();
-  if (!rpp_filter_)
-  {
-    throw std::runtime_error("RPP composition did not provide a LocalizationFilter15");
-  }
+  // Root configuration and filter activation remain owned by RosFilterBase.
+  // This helper exposes only the already-built runtime's declared slots via ROS.
+  rpp_slot_manager_ros_ =
+    std::make_unique<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime<>>>(*this, *rpp_runtime_);
 }
 
 void RosFilterBase::reset_rpp_filter()
@@ -2587,6 +2584,8 @@ void RosFilterBase::reset_rpp_filter()
   rpp_state_.setZero(STATE_SIZE);
   rpp_covariance_.setIdentity(STATE_SIZE, STATE_SIZE);
   rpp_covariance_ *= k_initial_covariance;
+  rpp_candidate_state_.setZero(STATE_SIZE);
+  rpp_candidate_covariance_.setZero(STATE_SIZE, STATE_SIZE);
   rpp_control_.stamp = 0;
   rpp_control_.control.setZero(TWIST_SIZE);
   _latest_control = rpp_control_;
@@ -2594,26 +2593,35 @@ void RosFilterBase::reset_rpp_filter()
   rpp_filter_initialized_ = false;
   rpp_remote_reset_required_ = false;
 
-  if (rpp_filter_)
+  if (rpp_runtime_)
   {
-    const auto status = rpp_filter_->reset(
-      std::move(make_estimate(rpp_state_, rpp_covariance_, rpp_last_measurement_time_)));
-    require_ok(status, "RPP filter reset failed");
+    auto filter = rpp_runtime_->get_context().get_active_component<LocalizationFilter15>("filter");
+    if (filter)
+    {
+      const auto status = filter->reset(
+        std::move(make_estimate(rpp_state_, rpp_covariance_, rpp_last_measurement_time_)));
+      require_ok(status, "RPP filter reset failed");
+    }
   }
 }
 
 void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
 {
+  auto filter = rpp_runtime_->get_context().get_active_component<LocalizationFilter15>("filter");
+  if (!filter)
+  {
+    return;
+  }
+  if (!require_valid_state(measurement.measurement_) ||
+    !require_valid_covariance(measurement.covariance_) ||
+    measurement.update_vector_.size() != static_cast<std::size_t>(STATE_SIZE))
+  {
+    RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
+      "Discarding invalid RPP filter measurement from " << measurement.topic_name_);
+    return;
+  }
   if (!rpp_filter_initialized_)
   {
-    require_valid_state(measurement.measurement_);
-    if (measurement.covariance_.rows() != STATE_SIZE ||
-      measurement.covariance_.cols() != STATE_SIZE || !measurement.covariance_.allFinite() ||
-      measurement.update_vector_.size() != static_cast<std::size_t>(STATE_SIZE))
-    {
-      throw std::invalid_argument("first measurement must have a finite 15-state payload");
-    }
-
     for (Eigen::Index row = 0; row < STATE_SIZE; ++row)
     {
       if (!measurement.update_vector_[static_cast<std::size_t>(row)])
@@ -2635,10 +2643,8 @@ void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
         rpp_covariance_(row, column) = row == column ? std::abs(value) : value;
       }
     }
-    require_valid_state(rpp_state_);
-    require_valid_covariance(rpp_covariance_);
     rpp_last_measurement_time_ = measurement.time_;
-    const auto status = rpp_filter_->initialize(
+    const auto status = filter->initialize(
       std::move(make_estimate(rpp_state_, rpp_covariance_, rpp_last_measurement_time_)));
     require_ok(status, "RPP filter initialization failed");
     rpp_filter_initialized_ = true;
@@ -2648,30 +2654,45 @@ void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
 
   if (rpp_remote_reset_required_)
   {
-    const auto status = rpp_filter_->reset(
+    const auto status = filter->reset(
       std::move(make_estimate(rpp_state_, rpp_covariance_, rpp_last_measurement_time_)));
     require_ok(status, "RPP filter reset failed");
     rpp_remote_reset_required_ = false;
   }
 
-  const auto result = rpp_filter_->correct(std::move(make_measurement(measurement)));
+  const auto result = filter->correct(std::move(make_measurement(measurement)));
   if (result.status().code() == 6) {
     RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
       "Dropping stale measurement from " << measurement.topic_name_ << ": " <<
       std::string(result.status().message()));
     return;
   }
-  require_ok(result.status(), "RPP filter correction failed");
-  apply_estimate(result.estimate(), rpp_state_, rpp_covariance_);
+  if (result.status().code() != 0)
+  {
+    RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
+      "Discarding RPP filter correction result: " << std::string(result.status().message()));
+    return;
+  }
+  std::string estimate_error;
+  if (!apply_estimate(result.estimate(), rpp_state_, rpp_covariance_, estimate_error))
+  {
+    RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
+      "Discarding invalid RPP filter correction estimate: " << estimate_error);
+  }
 }
 
-void RosFilterBase::predict_rpp_filter(
+bool RosFilterBase::predict_rpp_filter(
   const TimestampNs reference_time,
   const DurationNs delta)
 {
   if (!rpp_filter_initialized_)
   {
-    return;
+    return false;
+  }
+  auto filter = rpp_runtime_->get_context().get_active_component<LocalizationFilter15>("filter");
+  if (!filter)
+  {
+    return false;
   }
   if (delta < 0)
   {
@@ -2679,16 +2700,28 @@ void RosFilterBase::predict_rpp_filter(
   }
   if (rpp_remote_reset_required_)
   {
-    const auto status = rpp_filter_->reset(
+    const auto status = filter->reset(
       std::move(make_estimate(rpp_state_, rpp_covariance_, rpp_last_measurement_time_)));
     require_ok(status, "RPP filter reset failed");
     rpp_remote_reset_required_ = false;
   }
 
-  const auto result = rpp_filter_->predict(std::move(make_prediction_input(
+  const auto result = filter->predict(std::move(make_prediction_input(
     rpp_control_, rpp_control_update_vector_, rpp_use_control_, reference_time, delta)));
-  require_ok(result.status(), "RPP filter prediction failed");
-  apply_estimate(result.estimate(), rpp_state_, rpp_covariance_);
+  if (result.status().code() != 0)
+  {
+    RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
+      "Discarding RPP filter prediction result: " << std::string(result.status().message()));
+    return false;
+  }
+  std::string estimate_error;
+  if (!apply_estimate(result.estimate(), rpp_state_, rpp_covariance_, estimate_error))
+  {
+    RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
+      "Discarding invalid RPP filter prediction estimate: " << estimate_error);
+    return false;
+  }
+  return true;
 }
 
 void RosFilterBase::process_rpp_measurement(const Measurement & measurement)
@@ -2704,7 +2737,10 @@ void RosFilterBase::process_rpp_measurement(const Measurement & measurement)
   {
     rclcpp::Duration ros_delta = ros::to_ros_duration(delta);
     validate_rpp_filter_delta(ros_delta);
-    predict_rpp_filter(measurement.time_, ros_delta.nanoseconds());
+    if (!predict_rpp_filter(measurement.time_, ros_delta.nanoseconds()))
+    {
+      return;
+    }
   }
   correct_rpp_filter(measurement);
   if (delta >= 0)
@@ -2789,14 +2825,21 @@ void RosFilterBase::set_rpp_filter_sensor_timeout(const rclcpp::Duration & timeo
 
 void RosFilterBase::set_rpp_filter_state(const Eigen::VectorXd & state)
 {
-  require_valid_state(state);
+  if (!require_valid_state(state))
+  {
+    throw std::invalid_argument("state must contain 15 finite values");
+  }
   rpp_state_ = state;
   rpp_remote_reset_required_ = rpp_filter_initialized_;
 }
 
 void RosFilterBase::set_rpp_filter_covariance(const Eigen::MatrixXd & covariance)
 {
-  require_valid_covariance(covariance);
+  if (!require_valid_covariance(covariance))
+  {
+    throw std::invalid_argument(
+      "covariance must be a finite 15 by 15 matrix with non-negative diagonal");
+  }
   rpp_covariance_ = covariance;
   rpp_remote_reset_required_ = rpp_filter_initialized_;
 }
