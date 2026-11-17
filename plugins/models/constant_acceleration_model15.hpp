@@ -105,7 +105,8 @@ public:
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
     LocalizationModelPredictOutput15 output;
-    write_zero_output(output);
+    const bool state_only = input.stateOnly();
+    write_zero_output(output, !state_only);
 
     if (!ready_ || !model_)
     {
@@ -129,7 +130,7 @@ public:
 
     const auto input_covariance = input.covariance();
     const auto covariance_values = input_covariance.values();
-    if (!has_valid_covariance(covariance_values))
+    if (!state_only && !has_valid_covariance(covariance_values))
     {
       set_status(output, k_invalid_covariance,
         "covariance must contain 225 finite values with non-negative diagonal");
@@ -145,50 +146,60 @@ public:
     }
 
     rpp_localization::StateVector state(k_state_size);
-    rpp_localization::CovarianceMatrix covariance(k_state_size, k_state_size);
+    rpp_localization::CovarianceMatrix covariance =
+      rpp_localization::CovarianceMatrix::Zero(k_state_size, k_state_size);
     for (std::size_t index = 0; index < k_state_size; ++index)
     {
       state(static_cast<Eigen::Index>(index)) = state_values[index];
     }
-    for (std::size_t row = 0; row < k_state_size; ++row)
+    if (!state_only)
     {
-      for (std::size_t column = 0; column < k_state_size; ++column)
+      for (std::size_t row = 0; row < k_state_size; ++row)
       {
-        covariance(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(column)) =
-          covariance_values[row * k_state_size + column];
+        for (std::size_t column = 0; column < k_state_size; ++column)
+        {
+          covariance(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(column)) =
+            covariance_values[row * k_state_size + column];
+        }
       }
     }
 
-    write_output(output, state, covariance);
     const auto original_state = state;
-    const auto original_covariance = covariance;
+    rpp_localization::CovarianceMatrix original_covariance;
+    if (!state_only)
+    {
+      original_covariance = covariance;
+    }
 
     if (!configure_control(control, state, input.referenceTimeNs()))
     {
+      write_output(output, original_state, original_covariance, !state_only);
       set_status(output, k_invalid_time, "control timestamp arithmetic overflows");
       return output;
     }
 
     try
     {
+      model_->set_computes_jacobian(!state_only);
+      model_->set_computes_covariance(!state_only);
       model_->set_state(state);
       model_->predict(state, covariance, input.referenceTimeNs(), input.deltaNs());
     }
     catch (const std::exception& error)
     {
-      write_output(output, original_state, original_covariance);
+      write_output(output, original_state, original_covariance, !state_only);
       set_status(output, k_model_failure, error.what());
       return output;
     }
 
-    if (!state.allFinite() || !covariance.allFinite())
+    if (!state.allFinite() || (!state_only && !covariance.allFinite()))
     {
-      write_output(output, original_state, original_covariance);
+      write_output(output, original_state, original_covariance, !state_only);
       set_status(output, k_numerical_failure, "prediction produced a non-finite value");
       return output;
     }
 
-    write_output(output, state, covariance);
+    write_output(output, state, covariance, !state_only);
     set_status(output, k_ok, "");
     return output;
   }
@@ -427,7 +438,8 @@ private:
   static void write_output(
     LocalizationModelPredictOutput15& output,
     const rpp_localization::StateVector& state,
-    const rpp_localization::CovarianceMatrix& covariance)
+    const rpp_localization::CovarianceMatrix& covariance,
+    const bool with_covariance = true)
   {
     auto output_state = output.state();
     auto state_values = output_state.values();
@@ -435,6 +447,10 @@ private:
     for (std::size_t index = 0; index < k_state_size; ++index)
     {
       state_values[index] = state(static_cast<Eigen::Index>(index));
+    }
+    if (!with_covariance)
+    {
+      return;
     }
 
     auto output_covariance = output.covariance();
@@ -450,12 +466,14 @@ private:
     }
   }
 
-  static void write_zero_output(LocalizationModelPredictOutput15& output)
+  static void write_zero_output(
+    LocalizationModelPredictOutput15& output, const bool with_covariance = true)
   {
     write_output(
       output,
       rpp_localization::StateVector::Zero(k_state_size),
-      rpp_localization::CovarianceMatrix::Zero(k_state_size, k_state_size));
+      rpp_localization::CovarianceMatrix::Zero(k_state_size, k_state_size),
+      with_covariance);
   }
 
   static void set_status(
