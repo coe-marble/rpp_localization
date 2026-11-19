@@ -4,6 +4,7 @@
 
 #include <rpp_localization/core/filter_common.hpp>
 #include <rpp_localization/filters/unscented_kalman_filter.hpp>
+#include <rpp_localization/models/constant_acceleration_model.hpp>
 
 #include <cmath>
 #include <limits>
@@ -79,6 +80,9 @@ private:
     process_noise_covariance_.setZero(k_state_size, k_state_size);
     if (covariance_values.empty())
     {
+      // Zero process noise would make the filter ignore its measurements.
+      process_noise_covariance_ =
+        rpp_localization::ConstantAccelerationModel(k_state_size).get_process_noise_covariance();
       return;
     }
     if (covariance_values.size() != k_covariance_size)
