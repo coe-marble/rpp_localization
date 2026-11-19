@@ -6,9 +6,11 @@
 #ifndef RPP_LOCALIZATION__FILTERS__EXTENDED_KALMAN_FILTER_HPP_
 #define RPP_LOCALIZATION__FILTERS__EXTENDED_KALMAN_FILTER_HPP_
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
-#include <vector>
 
 #include "Eigen/Dense"
 #include "angles/angles.h"
@@ -44,9 +46,6 @@ class Ekf : public FilterBase
     void correct(const Measurement& measurement) override;
 
     void predict(TimestampNs reference_time, DurationNs delta) override;
-
-  private:
-    Eigen::MatrixXd _identity;
 };
 
 }  // namespace rpp_localization
@@ -62,8 +61,6 @@ inline Ekf::Ekf(ModelBase& model)
   }
 
   set_model_base(model);
-  _identity.resize(STATE_SIZE, STATE_SIZE);
-  _identity.setIdentity();
 }
 
 inline Ekf::~Ekf() {}
@@ -88,56 +85,59 @@ inline void Ekf::correct(const Measurement & measurement)
       "Measurement covariance is:\n" <<
       measurement.covariance_ << "\n");
 
-  // We don't want to update everything, so we need to build matrices that only
-  // update the measured parts of our state vector. Throughout prediction and
-  // correction, we attempt to maximize efficiency in Eigen.
+  // Fixed-capacity storage keeps the correction free of heap allocations.
+  using SubsetVector = Eigen::Matrix<double, Eigen::Dynamic, 1, 0, STATE_SIZE, 1>;
+  using SubsetMatrix =
+    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, STATE_SIZE, STATE_SIZE>;
+  using GainMatrix = Eigen::Matrix<double, STATE_SIZE, Eigen::Dynamic, 0, STATE_SIZE, STATE_SIZE>;
+  using StateMatrix = Eigen::Matrix<double, STATE_SIZE, STATE_SIZE>;
 
   // First, determine how many state vector values we're updating
-  std::vector<size_t> update_indices;
-  for (size_t i = 0; i < measurement.update_vector_.size(); ++i) {
+  std::array<Eigen::Index, STATE_SIZE> update_indices{};
+  Eigen::Index update_size = 0;
+  const auto mask_size = std::min<std::size_t>(measurement.update_vector_.size(), STATE_SIZE);
+  for (std::size_t i = 0; i < mask_size; ++i) {
     if (measurement.update_vector_[i]) {
+      const auto index = static_cast<Eigen::Index>(i);
       // Handle nan and inf values in measurements
-      if (std::isnan(measurement.measurement_(i))) {
+      if (std::isnan(measurement.measurement_(index))) {
         FB_DEBUG(
           "Value at index " << i <<
             " was nan. Excluding from update.\n");
-      } else if (std::isinf(measurement.measurement_(i))) {
+      } else if (std::isinf(measurement.measurement_(index))) {
         FB_DEBUG(
           "Value at index " << i <<
             " was inf. Excluding from update.\n");
       } else {
-        update_indices.push_back(i);
+        update_indices[static_cast<std::size_t>(update_size++)] = index;
       }
     }
   }
 
-  FB_DEBUG("Update indices are:\n" << update_indices << "\n");
-
-  size_t update_size = update_indices.size();
+  using IndexRow = Eigen::Matrix<Eigen::Index, 1, Eigen::Dynamic, Eigen::RowMajor, 1, STATE_SIZE>;
+  FB_DEBUG(
+    "Update indices are:\n" <<
+      IndexRow::Map(update_indices.data(), update_size) << "\n");
 
   // Now set up the relevant matrices
-  Eigen::VectorXd state_subset(update_size);       // x (in most literature)
-  Eigen::VectorXd measurement_subset(update_size);  // z
-  Eigen::MatrixXd measurement_covariance_subset(update_size, update_size);  // R
-  Eigen::MatrixXd state_to_measurement_subset(update_size, state.rows());  // H
-  Eigen::MatrixXd kalman_gain_subset(state.rows(), update_size);          // K
-  Eigen::VectorXd innovation_subset(update_size);  // z - Hx
+  SubsetVector state_subset(update_size);       // x (in most literature)
+  SubsetVector measurement_subset(update_size);  // z
+  SubsetMatrix measurement_covariance_subset(update_size, update_size);  // R
+  SubsetMatrix state_to_measurement_subset(update_size, STATE_SIZE);  // H
+  GainMatrix kalman_gain_subset(STATE_SIZE, update_size);          // K
+  SubsetVector innovation_subset(update_size);  // z - Hx
 
-  state_subset.setZero();
-  measurement_subset.setZero();
-  measurement_covariance_subset.setZero();
   state_to_measurement_subset.setZero();
-  kalman_gain_subset.setZero();
-  innovation_subset.setZero();
 
   // Now build the sub-matrices from the full-sized matrices
-  for (size_t i = 0; i < update_size; ++i) {
-    measurement_subset(i) = measurement.measurement_(update_indices[i]);
-    state_subset(i) = state(update_indices[i]);
+  for (Eigen::Index i = 0; i < update_size; ++i) {
+    const auto row = update_indices[static_cast<std::size_t>(i)];
+    measurement_subset(i) = measurement.measurement_(row);
+    state_subset(i) = state(row);
 
-    for (size_t j = 0; j < update_size; ++j) {
+    for (Eigen::Index j = 0; j < update_size; ++j) {
       measurement_covariance_subset(i, j) =
-        measurement.covariance_(update_indices[i], update_indices[j]);
+        measurement.covariance_(row, update_indices[static_cast<std::size_t>(j)]);
     }
 
     const auto normalized_covariance =
@@ -154,7 +154,7 @@ inline void Ekf::correct(const Measurement & measurement)
     if (validation::has_near_zero_covariance(normalized_covariance.status)) {
       FB_DEBUG(
         "WARNING: measurement had very small error covariance for index " <<
-          update_indices[i] <<
+          row <<
           ". Adding some noise to maintain filter stability.\n");
     }
 
@@ -164,8 +164,8 @@ inline void Ekf::correct(const Measurement & measurement)
   // The state-to-measurement function, h, will now be a measurement_size x
   // full_state_size matrix, with ones in the (i, i) locations of the values to
   // be updated
-  for (size_t i = 0; i < update_size; ++i) {
-    state_to_measurement_subset(i, update_indices[i]) = 1;
+  for (Eigen::Index i = 0; i < update_size; ++i) {
+    state_to_measurement_subset(i, update_indices[static_cast<std::size_t>(i)]) = 1;
   }
 
   FB_DEBUG(
@@ -178,28 +178,37 @@ inline void Ekf::correct(const Measurement & measurement)
 
   // (1) Compute the Kalman gain: K = (PH') / (HPH' + R)
   Eigen::MatrixXd& state_error_covariance = _model_as_base->get_state_covariance_unsafe();
-  Eigen::MatrixXd pht =
-    state_error_covariance * state_to_measurement_subset.transpose();
-  Eigen::MatrixXd hphr_inverse =
-    (state_to_measurement_subset * pht + measurement_covariance_subset)
-    .inverse();
-  kalman_gain_subset.noalias() = pht * hphr_inverse;
+  GainMatrix pht(STATE_SIZE, update_size);
+  pht.noalias() = state_error_covariance * state_to_measurement_subset.transpose();
+  SubsetMatrix innovation_covariance(update_size, update_size);
+  innovation_covariance.noalias() = state_to_measurement_subset * pht;
+  innovation_covariance += measurement_covariance_subset;
+  const Eigen::LDLT<SubsetMatrix> innovation_covariance_ldlt(innovation_covariance);
+  if (innovation_covariance_ldlt.info() != Eigen::Success) {
+    FB_DEBUG("Innovation covariance factorization failed.");
+    return;
+  }
+  // K' = (HPH' + R)^-1 HP', since HPH' + R is symmetric.
+  const SubsetMatrix kalman_gain_transpose = innovation_covariance_ldlt.solve(pht.transpose());
+  kalman_gain_subset = kalman_gain_transpose.transpose();
 
   innovation_subset = (measurement_subset - state_subset);
 
   // Wrap angles in the innovation
-  for (size_t i = 0; i < update_size; ++i) {
-    if (update_indices[i] == StateMemberRoll ||
-      update_indices[i] == StateMemberPitch ||
-      update_indices[i] == StateMemberYaw)
+  for (Eigen::Index i = 0; i < update_size; ++i) {
+    const auto row = update_indices[static_cast<std::size_t>(i)];
+    if (row == StateMemberRoll ||
+      row == StateMemberPitch ||
+      row == StateMemberYaw)
     {
       innovation_subset(i) = ::angles::normalize_angle(innovation_subset(i));
     }
   }
 
   //(2) Check Mahalanobis distance between mapped measurement and state.
-  if (filter_utilities::check_mahalanobis_threshold(
-      innovation_subset, hphr_inverse,
+  const SubsetVector weighted_innovation = innovation_covariance_ldlt.solve(innovation_subset);
+  if (filter_utilities::check_squared_mahalanobis_threshold(
+      innovation_subset.dot(weighted_innovation),
       measurement.mahalanobis_thresh_))
   {
     // (3) Apply the gain to the difference between the state and measurement: x
@@ -208,17 +217,18 @@ inline void Ekf::correct(const Measurement & measurement)
 
     // (4) Update the estimate error covariance using the Joseph form: (I -
     // KH)P(I - KH)' + KRK'
-    Eigen::MatrixXd gain_residual = _identity;
+    StateMatrix gain_residual = StateMatrix::Identity();
     gain_residual.noalias() -= kalman_gain_subset * state_to_measurement_subset;
-    state_error_covariance =
-      gain_residual * state_error_covariance * gain_residual.transpose();
-    state_error_covariance.noalias() += kalman_gain_subset *
-      measurement_covariance_subset *
-      kalman_gain_subset.transpose();
+    StateMatrix projected_covariance;
+    projected_covariance.noalias() = gain_residual * state_error_covariance;
+    state_error_covariance.noalias() = projected_covariance * gain_residual.transpose();
+    GainMatrix gain_measurement_covariance(STATE_SIZE, update_size);
+    gain_measurement_covariance.noalias() = kalman_gain_subset * measurement_covariance_subset;
+    state_error_covariance.noalias() +=
+      gain_measurement_covariance * kalman_gain_subset.transpose();
 
     // Handle wrapping of angles
     filter_utilities::wrap_state_angles(state);
-    _model_as_base->set_state_covariance(state_error_covariance);
     FB_DEBUG(
       "Kalman gain subset is:\n" <<
         kalman_gain_subset << "\nInnovation is:\n" <<
