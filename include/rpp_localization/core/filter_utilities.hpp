@@ -62,6 +62,8 @@ bool check_mahalanobis_threshold(
   const Eigen::MatrixXd & inverse_innovation_covariance,
   double n_sigmas);
 
+bool check_squared_mahalanobis_threshold(double squared_mahalanobis, double n_sigmas);
+
 /**
 * @brief Keeps the state Euler angles in the range [-pi, pi]
 */
@@ -149,9 +151,16 @@ inline bool check_mahalanobis_threshold(
   {
     return false;
   }
-  const double squared_mahalanobis =
-    innovation.dot(inverse_innovation_covariance * innovation);
-  return std::isfinite(squared_mahalanobis) && squared_mahalanobis >= 0.0 &&
+  return check_squared_mahalanobis_threshold(
+    innovation.dot(inverse_innovation_covariance * innovation), n_sigmas);
+}
+
+inline bool check_squared_mahalanobis_threshold(
+  const double squared_mahalanobis,
+  const double n_sigmas)
+{
+  return !std::isnan(n_sigmas) && n_sigmas >= 0.0 &&
+    std::isfinite(squared_mahalanobis) && squared_mahalanobis >= 0.0 &&
     std::sqrt(squared_mahalanobis) < n_sigmas;
 }
 
