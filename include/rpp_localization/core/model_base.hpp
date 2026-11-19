@@ -53,6 +53,8 @@ public:
     const TimestampNs reference_time,
     const DurationNs delta)
   {
+    // Reset so a model that propagates it anyway cannot accumulate it.
+    _cov_dontcare.setZero();
     predict(state, _cov_dontcare, reference_time, delta);
   }
 
