@@ -94,9 +94,9 @@ public:
   //!
   void enqueue_measurement(
     const std::string & topic_name,
-    const Eigen::VectorXd & measurement,
-    const Eigen::MatrixXd & measurement_covariance,
-    const std::vector<bool> & update_vector,
+    Eigen::VectorXd measurement,
+    Eigen::MatrixXd measurement_covariance,
+    std::vector<bool> update_vector,
     const double mahalanobis_thresh,
     const rclcpp::Time & time);
 
@@ -326,7 +326,7 @@ protected:
   //!
   void copy_covariance(
     const double * covariance_in,
-    Eigen::MatrixXd & covariance_out,
+    Eigen::Ref<Eigen::MatrixXd> covariance_out,
     const std::string & topic_name,
     const std::vector<bool> & update_vector,
     const size_t offset, const size_t dimension);
@@ -339,7 +339,7 @@ protected:
   //! @param[in] dimension - The number of values to copy
   //!
   void copy_covariance(
-    const Eigen::MatrixXd & covariance_in,
+    const Eigen::Ref<const Eigen::MatrixXd> & covariance_in,
     double * covariance_out, const size_t dimension);
 
 
@@ -630,7 +630,8 @@ protected:
 
   //! @brief We also need the previous covariance matrix for differential data
   //!
-  std::map<std::string, Eigen::MatrixXd> previous_measurement_covariances_;
+  std::map<std::string, Eigen::Matrix<double, POSE_SIZE, POSE_SIZE>>
+  previous_measurement_covariances_;
 
   //! @brief By default, the filter predicts and corrects up to the time of the
   //! latest measurement. If this is set to true, the filter does the same, but
