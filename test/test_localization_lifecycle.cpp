@@ -1,5 +1,8 @@
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -44,6 +47,159 @@ rpp_localization::LocalizationFilter15::LocalizationPredictInput15 make_predicti
   prediction.deltaNs() = 1;
   prediction.control().present() = false;
   return prediction;
+}
+
+using Estimate15 = rpp_localization::LocalizationFilter15::Estimate15;
+
+struct FilterScript
+{
+  explicit FilterScript(const std::string& configuration)
+  : data_manager(rpp::RPP_HOME, RPP_LOCALIZATION_SOURCE_DIR),
+    builder(data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK)),
+    runtime(builder.build_script({
+      rpp::LibraryScript{"rpp_localization", "localization"},
+      std::optional<std::string>{configuration}, std::nullopt}))
+  {
+  }
+
+  const rpp::SubcomponentContext& filter() const
+  {
+    return runtime.get_context().get_subcomponent_context("filter");
+  }
+
+  std::shared_ptr<rpp_localization::LocalizationFilter15> instance() const
+  {
+    return filter().get_instance<rpp_localization::LocalizationFilter15>();
+  }
+
+  rpp::RppDataManager data_manager;
+  rpp::ComponentRuntimeBuilder builder;
+  rpp::ScriptRuntime<> runtime;
+};
+
+Estimate15 make_moving_estimate()
+{
+  auto estimate = make_estimate();
+  auto state = estimate.state().values();
+  auto covariance = estimate.covariance().values();
+  for (std::size_t row = 0; row < k_state_size; ++row)
+  {
+    state[row] = 0.1 * static_cast<double>(row + 1);
+    covariance[row * k_state_size + row] = 0.5;
+  }
+  estimate.referenceTimeNs() = 100'000'000;
+  return estimate;
+}
+
+rpp_localization::LocalizationFilter15::LocalizationPredictInput15 make_prediction_at(
+  const std::int64_t reference_time)
+{
+  rpp_localization::LocalizationFilter15::LocalizationPredictInput15 prediction;
+  prediction.referenceTimeNs() = reference_time;
+  prediction.deltaNs() = 50'000'000;
+  prediction.control().present() = false;
+  return prediction;
+}
+
+rpp::HandoverState handover(Estimate15 estimate)
+{
+  return rpp::HandoverState(Estimate15::Const(std::move(estimate)));
+}
+
+TEST(LocalizationLifecycle, HandsOverTheEstimateBetweenEkfAndUkf)
+{
+  const std::vector<std::pair<std::string, std::string>> switches{{"ekf", "ukf"}, {"ukf", "ekf"}};
+  for (const auto& [source_name, target_name] : switches)
+  {
+    SCOPED_TRACE(source_name + " to " + target_name);
+    FilterScript source(source_name);
+    FilterScript target(target_name);
+    ASSERT_TRUE(source.runtime.configure().success);
+    ASSERT_TRUE(target.runtime.configure().success);
+
+    ASSERT_TRUE(source.filter().activate().success);
+    ASSERT_EQ(source.instance()->initialize(make_moving_estimate()).code(), 0);
+    ASSERT_EQ(source.instance()->predict(make_prediction_at(150'000'000)).status().code(), 0);
+    const auto expected = source.instance()->getEstimate();
+    ASSERT_EQ(expected.status().code(), 0);
+
+    auto stopped = source.filter().deactivate();
+    ASSERT_TRUE(stopped.result.success);
+    ASSERT_TRUE(stopped.state.has_value());
+    ASSERT_TRUE(target.filter().activate(std::move(*stopped.state)).success);
+
+    const auto restored = target.instance()->getEstimate();
+    ASSERT_EQ(restored.status().code(), 0);
+    EXPECT_EQ(restored.estimate().referenceTimeNs(), 150'000'000);
+    EXPECT_EQ(restored.estimate().referenceTimeNs(), expected.estimate().referenceTimeNs());
+    for (std::size_t index = 0; index < k_state_size; ++index)
+    {
+      EXPECT_EQ(
+        restored.estimate().state().values()[index],
+        expected.estimate().state().values()[index]);
+    }
+    for (std::size_t index = 0; index < k_state_size * k_state_size; ++index)
+    {
+      EXPECT_EQ(
+        restored.estimate().covariance().values()[index],
+        expected.estimate().covariance().values()[index]);
+    }
+    EXPECT_EQ(target.instance()->predict(make_prediction_at(200'000'000)).status().code(), 0);
+
+    ASSERT_TRUE(target.filter().deactivate().result.success);
+    ASSERT_TRUE(source.runtime.cleanup().success);
+    ASSERT_TRUE(target.runtime.cleanup().success);
+  }
+}
+
+TEST(LocalizationLifecycle, ColdActivationWaitsForInitialization)
+{
+  FilterScript script("ekf");
+  ASSERT_TRUE(script.runtime.configure().success);
+
+  ASSERT_TRUE(script.filter().activate().success);
+  EXPECT_EQ(script.instance()->getEstimate().status().code(), 5);
+  const auto stopped = script.filter().deactivate();
+  ASSERT_TRUE(stopped.result.success);
+  EXPECT_FALSE(stopped.state.has_value());
+
+  ASSERT_TRUE(script.filter().activate().success);
+  EXPECT_EQ(script.instance()->getEstimate().status().code(), 5);
+  EXPECT_EQ(script.instance()->initialize(make_moving_estimate()).code(), 0);
+  EXPECT_EQ(script.instance()->getEstimate().status().code(), 0);
+  ASSERT_TRUE(script.filter().deactivate().result.success);
+  ASSERT_TRUE(script.runtime.cleanup().success);
+}
+
+TEST(LocalizationLifecycle, RejectsAnInvalidHandoverEstimate)
+{
+  auto non_finite = make_moving_estimate();
+  non_finite.state().values()[0] = std::numeric_limits<double>::quiet_NaN();
+  auto wrong_size = make_moving_estimate();
+  wrong_size.covariance().values().resize(k_state_size);
+  std::vector<Estimate15> invalid;
+  invalid.push_back(std::move(non_finite));
+  invalid.push_back(std::move(wrong_size));
+
+  for (auto& estimate : invalid)
+  {
+    FilterScript script("ekf");
+    ASSERT_TRUE(script.runtime.configure().success);
+
+    const auto result = script.filter().activate(handover(std::move(estimate)));
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.message.find("handover estimate"), std::string::npos) << result.message;
+    EXPECT_FALSE(script.filter().is_active());
+
+    // A failed activation leaves the slot in ERROR until it is deactivated.
+    const auto recovered = script.filter().deactivate();
+    ASSERT_TRUE(recovered.result.success) << recovered.result.message;
+    EXPECT_FALSE(recovered.state.has_value());
+    ASSERT_TRUE(script.filter().activate().success);
+    EXPECT_EQ(script.instance()->getEstimate().status().code(), 5);
+    ASSERT_TRUE(script.filter().deactivate().result.success);
+    ASSERT_TRUE(script.runtime.cleanup().success);
+  }
 }
 
 TEST(LocalizationLifecycle, ConfiguresActivatesAndDeactivatesTheFilterTree)

@@ -121,7 +121,9 @@ interface NavModel15 $Anot.plugin("NavModel15") {
 # `correct` may report staleMeasurement when its replay policy cannot accept
 # the timestamp. Lifecycle operations return status payloads instead of using
 # transport errors for ordinary validation failures.
-interface LocalizationFilter15 $Anot.plugin("LocalizationFilter15") {
+# Deactivation hands over the current Estimate15; activation may restore one.
+interface LocalizationFilter15 $Anot.plugin("LocalizationFilter15")
+    $Anot.lifecycleState("Estimate15") {
   initialize @0 (initialEstimate :Estimate15) -> (status :LocalizationStatus);
   predict @1 (input :LocalizationPredictInput15)
       -> (result :LocalizationFilterResult15);

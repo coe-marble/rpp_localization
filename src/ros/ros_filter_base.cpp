@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <functional>
 #include <limits>
@@ -2345,6 +2346,7 @@ namespace
 {
 
 constexpr double k_initial_covariance = 1e-9;
+constexpr std::uint16_t k_filter_not_initialized = 5;
 
 struct ScriptReference
 {
@@ -2551,6 +2553,7 @@ void RosFilterBase::initialize_rpp_filter()
     throw std::invalid_argument(
       "initial_estimate_covariance must be a finite 15 by 15 matrix with non-negative diagonal");
   }
+  rpp_initial_covariance_ = rpp_covariance_;
 
   const auto script_reference = declare_parameter<std::string>(
     "script", "rpp_localization::localization");
@@ -2560,11 +2563,13 @@ void RosFilterBase::initialize_rpp_filter()
     "controller.activate_on_start", true);
   const auto script = parse_script_reference(script_reference);
   const auto workspace = declare_parameter<std::string>("rpp_workspace", "");
+  const bool allow_dynamic_components = declare_parameter<bool>("allow_dynamic_components", false);
 
   rpp::RppDataManager data_manager(
     rpp::RPP_HOME,
     workspace.empty() ? ament_index_cpp::get_package_share_path(script.library).string() : workspace);
-  rpp::ComponentRuntimeBuilder runtime_builder(data_manager);
+  rpp::ComponentRuntimeBuilder runtime_builder(
+    data_manager, rpp::ClockOptions(), allow_dynamic_components);
   const std::optional<std::string> selected_configuration = configuration.empty() ?
     std::nullopt : std::optional<std::string>(configuration);
   rpp_runtime_ = std::make_unique<rpp::ScriptRuntime<>>(
@@ -2603,6 +2608,17 @@ void RosFilterBase::reset_rpp_filter()
       require_ok(status, "RPP filter reset failed");
     }
   }
+}
+
+// A filter activated without handover starts empty; initialize it like at startup.
+void RosFilterBase::restart_rpp_filter_initialization()
+{
+  RCLCPP_INFO(get_logger(),
+    "Active RPP filter has no estimate; initializing from the next measurement");
+  rpp_state_.setZero(STATE_SIZE);
+  rpp_covariance_ = rpp_initial_covariance_;
+  rpp_filter_initialized_ = false;
+  rpp_remote_reset_required_ = false;
 }
 
 void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
@@ -2661,6 +2677,11 @@ void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
   }
 
   const auto result = filter->correct(std::move(make_measurement(measurement)));
+  if (result.status().code() == k_filter_not_initialized) {
+    restart_rpp_filter_initialization();
+    correct_rpp_filter(measurement);
+    return;
+  }
   if (result.status().code() == 6) {
     RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
       "Dropping stale measurement from " << measurement.topic_name_ << ": " <<
@@ -2708,6 +2729,11 @@ bool RosFilterBase::predict_rpp_filter(
 
   const auto result = filter->predict(std::move(make_prediction_input(
     rpp_control_, rpp_control_update_vector_, rpp_use_control_, reference_time, delta)));
+  if (result.status().code() == k_filter_not_initialized)
+  {
+    restart_rpp_filter_initialization();
+    return false;
+  }
   if (result.status().code() != 0)
   {
     RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
@@ -2739,6 +2765,10 @@ void RosFilterBase::process_rpp_measurement(const Measurement & measurement)
     validate_rpp_filter_delta(ros_delta);
     if (!predict_rpp_filter(measurement.time_, ros_delta.nanoseconds()))
     {
+      if (!rpp_filter_initialized_)
+      {
+        correct_rpp_filter(measurement);
+      }
       return;
     }
   }

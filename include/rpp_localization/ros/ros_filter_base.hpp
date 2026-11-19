@@ -240,6 +240,7 @@ protected:
 
   void initialize_rpp_filter();
   void reset_rpp_filter();
+  void restart_rpp_filter_initialization();
   void correct_rpp_filter(const Measurement & measurement);
   [[nodiscard]] bool predict_rpp_filter(TimestampNs reference_time, DurationNs delta);
   [[nodiscard]] bool apply_estimate(
@@ -672,6 +673,7 @@ protected:
   std::unique_ptr<LocalizationScript> rpp_script_;
   StateVector rpp_state_;
   CovarianceMatrix rpp_covariance_;
+  CovarianceMatrix rpp_initial_covariance_;
   // Reused transaction buffers for plugin estimates. A valid candidate swaps
   // with the live estimate; an invalid one is overwritten by the next result.
   StateVector rpp_candidate_state_;

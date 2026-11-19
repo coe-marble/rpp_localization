@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -56,7 +57,7 @@ public:
     return {};
   }
 
-  rpp::CallbackResult on_activate() override
+  rpp::CallbackResult on_activate(const std::optional<Estimate15::Const>& state) override
   {
     if (!context_ || !component_ready_ || !model_runtime_)
     {
@@ -64,27 +65,55 @@ public:
         "LocalizationFilter15 must be configured before activation");
     }
 
-    auto result = context_->get_subcomponent_context("model").activate();
+    const auto& model_context = context_->get_subcomponent_context("model");
+    auto result = model_context.activate();
     if (!result.success)
     {
       return result;
     }
     reset();
+    if (!state)
+    {
+      return {};
+    }
+
+    const auto restored = restore_estimate(*state);
+    if (restored.code != k_ok)
+    {
+      reset();
+      model_context.deactivate();
+      return rpp::CallbackResult::failure(
+        "LocalizationFilter15 rejected the handover estimate: " + restored.message);
+    }
     return {};
   }
 
-  rpp::CallbackResult on_deactivate() override
+  rpp::DeactivationResult<Estimate15::Const> on_deactivate() override
   {
+    std::optional<Estimate15::Const> handover;
+    if (filter_ready_ && model_runtime_)
+    {
+      Estimate15 estimate;
+      write_estimate(
+        estimate, model_runtime_->get_state(), model_runtime_->get_state_covariance(),
+        reference_time_);
+      handover.emplace(std::move(estimate));
+    }
     filter_.reset();
     filter_ready_ = false;
     history_.clear();
     initial_checkpoint_ = {};
     if (!context_)
     {
-      return rpp::CallbackResult::failure(
-        "LocalizationFilter15 must be configured before deactivation");
+      return {rpp::CallbackResult::failure(
+          "LocalizationFilter15 must be configured before deactivation"), std::nullopt};
     }
-    return context_->get_subcomponent_context("model").deactivate().result;
+    auto result = context_->get_subcomponent_context("model").deactivate().result;
+    if (!result.success)
+    {
+      return {std::move(result), std::nullopt};
+    }
+    return {std::move(result), std::move(handover)};
   }
 
   void reset() override
@@ -110,38 +139,8 @@ public:
       return status;
     }
 
-    rpp_localization::StateVector state(k_state_size);
-    rpp_localization::CovarianceMatrix covariance(k_state_size, k_state_size);
-    const auto validation = read_estimate(initial_estimate, state, covariance);
-    if (validation.code != k_ok)
-    {
-      set_status(status, validation.code, validation.message);
-      return status;
-    }
-
-    model_runtime_->set_state(state);
-    model_runtime_->set_state_covariance(covariance);
-    try
-    {
-      filter_ = create_filter(*model_runtime_);
-    }
-    catch (const std::exception& error)
-    {
-      set_status(status, k_model_failure, error.what());
-      return status;
-    }
-    if (!filter_)
-    {
-      set_status(status, k_model_failure, "filter factory returned no runtime filter");
-      return status;
-    }
-
-    reference_time_ = initial_estimate.referenceTimeNs();
-    initial_reference_time_ = reference_time_;
-    history_.clear();
-    initial_checkpoint_ = capture_checkpoint();
-    filter_ready_ = true;
-    set_status(status, k_ok, "");
+    const auto restored = restore_estimate(initial_estimate);
+    set_status(status, restored.code, restored.message);
     return status;
   }
 
@@ -448,6 +447,42 @@ private:
       (std::isfinite(threshold) || threshold == std::numeric_limits<double>::infinity());
   }
 
+  // Validates the whole estimate before committing it to the runtime filter.
+  ValidationResult restore_estimate(const Estimate15::Const& estimate)
+  {
+    rpp_localization::StateVector state(k_state_size);
+    rpp_localization::CovarianceMatrix covariance(k_state_size, k_state_size);
+    const auto validation = read_estimate(estimate, state, covariance);
+    if (validation.code != k_ok)
+    {
+      return validation;
+    }
+
+    std::unique_ptr<rpp_localization::FilterBase> filter;
+    model_runtime_->set_state(state);
+    model_runtime_->set_state_covariance(covariance);
+    try
+    {
+      filter = create_filter(*model_runtime_);
+    }
+    catch (const std::exception& error)
+    {
+      return {k_model_failure, error.what()};
+    }
+    if (!filter)
+    {
+      return {k_model_failure, "filter factory returned no runtime filter"};
+    }
+
+    filter_ = std::move(filter);
+    reference_time_ = estimate.referenceTimeNs();
+    initial_reference_time_ = reference_time_;
+    history_.clear();
+    initial_checkpoint_ = capture_checkpoint();
+    filter_ready_ = true;
+    return {k_ok, ""};
+  }
+
   static ValidationResult read_estimate(
     const Estimate15::Const& input,
     rpp_localization::StateVector& state,
@@ -718,8 +753,9 @@ private:
     model_runtime_->set_control(control);
   }
 
+  template <typename EstimateBuilder>
   static void write_estimate(
-    Estimate15 estimate,
+    EstimateBuilder&& estimate,
     const rpp_localization::StateVector& state,
     const rpp_localization::CovarianceMatrix& covariance,
     const rpp_localization::TimestampNs reference_time)
