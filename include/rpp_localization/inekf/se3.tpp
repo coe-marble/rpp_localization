@@ -311,8 +311,8 @@ namespace rpp_localization::InEKF
         int curr_dim = calcStateDim(rotSize, curr_cols, curr_A);
 
         // Find angles
-        double theta = acos((g.R()().trace() - 1) / 2);
         Eigen::Vector3d w = SO3<>::log(g.R());
+        double theta = w.norm();
 
         // Find V inverse
         Eigen::Matrix3d V;

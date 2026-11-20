@@ -1,0 +1,21 @@
+{
+  "Id": "33333333-3333-4333-8333-333333333333",
+  "Name": "DefaultInekf",
+  "PluginType": "rpp_localization::InvariantFilter",
+  "PluginName": "rpp_localization::Inekf",
+  "Library": "rpp_localization",
+  "SubcomponentSpec": {
+    "model": "rpp_localization::InertialModel"
+  },
+  "Subcomponents": {
+    "model": {
+      "Id": "33333333-3333-4333-8333-333333333334",
+      "PluginType": "rpp_localization::InertialModel",
+      "PluginName": "rpp_localization::ImuInertialModel",
+      "SlotName": "model",
+      "Library": "rpp_localization",
+      "IsLinked": false
+    }
+  },
+  "ParentComponentInfo": null
+}

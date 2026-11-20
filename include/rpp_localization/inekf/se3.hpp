@@ -92,6 +92,7 @@ class SE3 : public LieGroup<SE3<C,A>,calcStateDim(3,C,A),calcStateMtxSize(3,C),A
          * @param State SE2 object. The matrix, covariance and augmented state will all be copied from it.
          */
         SE3(const SE3& State) : SE3(State(), State.cov(), State.aug()) {}
+        SE3& operator=(const SE3&) = default;
         
         /**
          * @brief Construct a new SE2 object from a tangent vector using the exponential operator.

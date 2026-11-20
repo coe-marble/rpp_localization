@@ -97,15 +97,23 @@ target_link_libraries(${core_library_name}
 add_executable(localization_node src/ros/nodes/localization_node.cpp)
 add_executable(ekf_node src/ros/nodes/ekf_node.cpp)
 add_executable(ukf_node src/ros/nodes/ukf_node.cpp)
+add_executable(inekf_node src/ros/nodes/inekf_node.cpp)
 target_link_libraries(localization_node PRIVATE ${core_library_name})
 target_link_libraries(ekf_node PRIVATE ${core_library_name})
 target_link_libraries(ukf_node PRIVATE ${core_library_name})
+target_link_libraries(inekf_node PRIVATE ${core_library_name})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
   ament_add_gtest(test_core_compatibility test/test_core_compatibility.cpp)
   target_link_libraries(test_core_compatibility rpp_localization::numerics)
+
+  ament_add_gtest(test_invariant_ekf test/test_invariant_ekf.cpp)
+  target_link_libraries(test_invariant_ekf rpp_localization::numerics)
+
+  ament_add_gtest(test_inekf_process_contract test/test_inekf_process_contract.cpp)
+  target_link_libraries(test_inekf_process_contract rpp_localization::numerics)
 
   ament_add_gtest(test_ros_parameters test/test_ros_parameters.cpp)
   target_link_libraries(test_ros_parameters ${core_library_name})
@@ -136,6 +144,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_localization_lifecycle ${core_library_name})
     target_compile_definitions(test_localization_lifecycle PRIVATE
       RPP_LOCALIZATION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+    ament_add_gtest(test_inekf_lifecycle test/test_inekf_lifecycle.cpp)
+    target_link_libraries(test_inekf_lifecycle ${core_library_name})
+    target_compile_definitions(test_inekf_lifecycle PRIVATE
+      RPP_LOCALIZATION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
   if(RPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS)
@@ -151,12 +164,13 @@ install(TARGETS ${core_library_name} rpp_localization_numerics
   RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
 )
-install(TARGETS localization_node ekf_node ukf_node
+install(TARGETS localization_node ekf_node ukf_node inekf_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY
   include/rpp_localization/core
   include/rpp_localization/filters
+  include/rpp_localization/inekf
   include/rpp_localization/models
   include/rpp_localization/ros
   DESTINATION include/rpp_localization
