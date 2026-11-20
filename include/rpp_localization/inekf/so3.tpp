@@ -24,7 +24,9 @@ SO3<A>::SO3(double w1, double w2, double w3, const MatrixCov& Cov, const VectorA
     MatrixState wx = SO3<>::wedge(w);
 
     if(abs(theta) < .0001){
-        State_ = MatrixState::Identity() + wx/2 + wx*wx/6 + wx*wx*wx/24;
+        // Taylor series of the exponential itself; the halved terms that
+        // stood here are the series of the left Jacobian.
+        State_ = MatrixState::Identity() + wx + wx*wx/2 + wx*wx*wx/6;
     }
     else{
         State_ = MatrixState::Identity() + wx*(sin(theta)/theta) + wx*wx*((1 - cos(theta))/(theta*theta));
@@ -101,13 +103,15 @@ template <int A>
 typename SO3<A>::TangentVector SO3<A>::log(const SO3& g){
     TangentVector xi(g.aug().rows()+3);
 
-    double theta = acos( (g().trace()-1)/2 );
-    xi(0) = g()(2,1) - g()(1,2);
-    xi(1) = g()(0,2) - g()(2,0);
-    xi(2) = g()(1,0) - g()(0,1);
-    if(theta != 0){
-        xi.head(3) *= theta / (2*sin(theta));
+    // The trace formula with acos returns NaN when rounding pushes the trace
+    // above 3 and loses the axis near half a turn, so the angle and axis are
+    // taken through a quaternion instead.
+    const Eigen::AngleAxisd rotation(Eigen::Quaterniond(Eigen::Matrix3d(g())).normalized());
+    double theta = rotation.angle();
+    if(theta > M_PI){
+        theta -= 2*M_PI;
     }
+    xi.head(3) = theta * rotation.axis();
 
     xi.tail(xi.rows()-3) = g.aug();
     return xi;

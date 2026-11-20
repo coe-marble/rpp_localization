@@ -1,0 +1,17 @@
+{
+  "Id": "33333333-3333-4333-8333-333333333334",
+  "Name": "DefaultImuInertialModel",
+  "PluginType": "rpp_localization::InertialModel",
+  "PluginName": "rpp_localization::ImuInertialModel",
+  "Library": "rpp_localization",
+  "SubcomponentSpec": {},
+  "Subcomponents": {},
+  "ParentComponentInfo": {
+    "Id": "33333333-3333-4333-8333-333333333333",
+    "PluginType": "rpp_localization::InvariantFilter",
+    "PluginName": "rpp_localization::Inekf",
+    "SlotName": "model",
+    "Library": "rpp_localization",
+    "IsLinked": false
+  }
+}
