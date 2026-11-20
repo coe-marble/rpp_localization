@@ -22,11 +22,11 @@ public:
   using ParameterDescription = rpp::params::ParameterDescription;
 
   // Noise values are standard deviations per square root of a second, one
-  // per body axis.
+  // per body axis. gyro_noise is tuned in test/filter_benchmark.
   RPP_PARAMETERS(
     ParameterDescription::create<double>("gravity", 9.80665),
     ParameterDescription::create<std::vector<double>>(
-      "gyro_noise", std::vector<double>(3, 1e-3)),
+      "gyro_noise", std::vector<double>(3, 5e-3)),
     ParameterDescription::create<std::vector<double>>(
       "accel_noise", std::vector<double>(3, 1e-1)),
     ParameterDescription::create<std::vector<double>>(

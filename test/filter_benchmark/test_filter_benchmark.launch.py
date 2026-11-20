@@ -1,10 +1,18 @@
-"""EKF, UKF and InEKF of rpp_localization on robot_localization's test bags, one filter per run."""
+"""EKF, UKF and InEKF of rpp_localization on robot_localization's test bags, one filter per run.
+
+BENCHMARK_SETUP selects the sensors:
+- upstream: EKF and UKF with the upstream bag configs, the InEKF with all it can fuse
+- common: the same sensors for all three (IMU orientation, rates and acceleration, odometry velocity)
+"""
 
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import sys
+import tempfile
 import time
 import unittest
 
@@ -35,6 +43,9 @@ _upstream_parameters = _parity._upstream_parameters
 
 _BAG_RATE = float(os.environ.get("BENCHMARK_BAG_RATE", "1.0"))
 _CLOCK_HZ = os.environ.get("BENCHMARK_CLOCK_HZ", "1000")
+_SETUP = os.environ.get("BENCHMARK_SETUP", "upstream")
+if _SETUP not in ("upstream", "common"):
+    raise ValueError(f"unknown BENCHMARK_SETUP {_SETUP}")
 
 _CASES = [(bag, filter_type) for bag in ("test1", "test2", "test3")
           for filter_type in ("ekf", "ukf", "inekf")]
@@ -45,6 +56,38 @@ if os.environ.get("BENCHMARK_CASES"):
 # the upstream EKF fuses as positions.
 _INEKF_POSITION_AXES = {"test1": [False, False, False], "test2": [False, False, False],
                         "test3": [False, False, True]}
+
+# The sensors of the InEKF, as 15-state masks for the EKF and UKF.
+_COMMON_IMU = [False, False, False, True, True, True, False, False, False,
+               True, True, True, True, True, True]
+
+
+# InEKF model noise overrides as JSON, e.g. '{"accel_noise": [0.5, 0.5, 0.5]}'.
+_INEKF_NOISE = json.loads(os.environ.get("BENCHMARK_INEKF_NOISE", "{}"))
+
+
+def _inekf_workspace() -> str:
+    """A copy of the package's .rppws with the InEKF model noise overrides applied."""
+    from ament_index_python.packages import get_package_share_directory
+    workspace = Path(tempfile.mkdtemp(prefix="rpp_benchmark_"))
+    shutil.copytree(Path(get_package_share_directory("rpp_localization")) / ".rppws",
+                    workspace / ".rppws")
+    model = next((workspace / ".rppws/parts/rpp_localization__inekf").rglob(
+        "subcomponents/*/params/parameters.py"))
+    text = model.read_text()
+    for name, value in _INEKF_NOISE.items():
+        text, count = re.subn(rf"^(\s*{name}) = .*$", rf"\1 = {value!r}", text, flags=re.MULTILINE)
+        if count != 1:
+            raise ValueError(f"unknown InEKF model parameter {name}")
+    model.write_text(text)
+    return str(workspace)
+
+
+def _common_odometry(bag: str) -> list[bool]:
+    mask = [False] * 15
+    mask[2] = _INEKF_POSITION_AXES[bag][2]
+    mask[6:9] = [True, True, True]
+    return mask
 
 
 def _filter_node(bag: str, filter_type: str) -> Node:
@@ -61,7 +104,10 @@ def _filter_node(bag: str, filter_type: str) -> Node:
                 "imu0": upstream["imu0"],
                 "odom0": upstream["odom0"],
                 "odom0_position_axes": _INEKF_POSITION_AXES[bag],
-            }])
+            } | ({"rpp_workspace": _inekf_workspace()} if _INEKF_NOISE else {})])
+    if _SETUP != "upstream":
+        upstream["imu0_config"] = _COMMON_IMU
+        upstream["odom0_config"] = _common_odometry(bag)
     return Node(
         package="rpp_localization", executable="localization_node", name="filter",
         namespace=filter_type, output="log",
@@ -146,15 +192,17 @@ class TestFilterBenchmark(unittest.TestCase):
         result = {
             "bag": bag,
             "filter": filter_type,
+            "setup": _SETUP,
+            "inekf_noise": _INEKF_NOISE,
             "bag_rate": _BAG_RATE,
             "expected_final_position": list(expected),
             "upstream_tolerance_m": tolerance,
             "summary": parity_metrics.summary(track, expected),
             "cpu_seconds": _cpu_seconds(executable),
         }
-        if len(self.fixes) > 10:
-            result["gnss_rms_m"] = parity_metrics.rms_distance_to_fixes(track, self.fixes)
         print(json.dumps(result, indent=2))
+        if len(self.fixes) > 10:
+            result["fixes"] = self.fixes
 
         results_directory = os.environ.get("BENCHMARK_RESULTS_DIR")
         if results_directory:
