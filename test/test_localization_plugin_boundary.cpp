@@ -60,6 +60,8 @@ public:
     ++prediction_count_;
     reference_time_ = input.referenceTimeNs();
     delta_ = input.deltaNs();
+    state_only_ = input.stateOnly();
+    covariance_input_size_ = input.covariance().values().size();
     const auto input_control = input.control();
     control_present_ = input_control.present();
     control_stamp_ = input_control.stampNs();
@@ -91,6 +93,8 @@ public:
   std::size_t prediction_count_{0};
   rpp_localization::TimestampNs reference_time_{0};
   rpp_localization::DurationNs delta_{0};
+  bool state_only_{false};
+  std::size_t covariance_input_size_{0};
   bool control_present_{false};
   rpp_localization::TimestampNs control_stamp_{0};
   std::vector<double> control_values_;
@@ -198,6 +202,26 @@ TEST(NavModel15Adapter, ForwardsCanonicalStateCovarianceControlAndTime)
   EXPECT_DOUBLE_EQ(state[0], 1.0);
   EXPECT_DOUBLE_EQ(state[14], 15.0);
   EXPECT_DOUBLE_EQ(covariance(0, 0), 2.0);
+  EXPECT_FALSE(model->state_only_);
+  EXPECT_EQ(model->covariance_input_size_, k_covariance_size);
+}
+
+TEST(NavModel15Adapter, StateOnlyPredictionSkipsCovariance)
+{
+  auto model = std::make_shared<FakeNavModel15>();
+  rpp_localization::plugins::detail::NavModel15Adapter adapter(model);
+  adapter.set_computes_covariance(false);
+  rpp_localization::StateVector state = rpp_localization::StateVector::Zero(k_state_size);
+  rpp_localization::CovarianceMatrix covariance =
+    rpp_localization::CovarianceMatrix::Identity(k_state_size, k_state_size);
+
+  model->mode_ = FakeNavModel15::OutputMode::k_invalid_covariance;
+  adapter.predict(state, covariance, 41, 17);
+
+  EXPECT_TRUE(model->state_only_);
+  EXPECT_EQ(model->covariance_input_size_, 0u);
+  EXPECT_DOUBLE_EQ(state[0], 1.0);
+  EXPECT_DOUBLE_EQ(covariance(0, 0), 1.0);
 }
 
 TEST(NavModel15Adapter, RejectsModelStatusAndInvalidCovariance)

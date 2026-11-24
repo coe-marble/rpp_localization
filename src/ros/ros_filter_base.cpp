@@ -55,6 +55,7 @@
 namespace rpp_localization
 {
 using namespace std::chrono_literals;
+using Matrix6d = Eigen::Matrix<double, POSE_SIZE, POSE_SIZE>;
 
 RosFilterBase::RosFilterBase(
   const rclcpp::NodeOptions & options, const bool online,
@@ -212,8 +213,8 @@ void RosFilterBase::acceleration_callback(
       // kind of measurement we're dealing with when we debug the core filter
       // logic.
       enqueue_measurement(
-        topic_name, measurement, measurement_covariance,
-        update_vector_corrected,
+        topic_name, std::move(measurement), std::move(measurement_covariance),
+        std::move(update_vector_corrected),
         callback_data.rejection_threshold_, msg->header.stamp);
 
       RF_DEBUG(
@@ -297,17 +298,17 @@ void RosFilterBase::control_stamped_callback(
 }
 
 void RosFilterBase::enqueue_measurement(
-  const std::string & topic_name, const Eigen::VectorXd & measurement,
-  const Eigen::MatrixXd & measurement_covariance,
-  const std::vector<bool> & update_vector, const double mahalanobis_thresh,
+  const std::string & topic_name, Eigen::VectorXd measurement,
+  Eigen::MatrixXd measurement_covariance,
+  std::vector<bool> update_vector, const double mahalanobis_thresh,
   const rclcpp::Time & time)
 {
-  MeasurementPtr meas = MeasurementPtr(new Measurement());
+  MeasurementPtr meas = std::make_shared<Measurement>();
 
   meas->topic_name_ = topic_name;
-  meas->measurement_ = measurement;
-  meas->covariance_ = measurement_covariance;
-  meas->update_vector_ = update_vector;
+  meas->measurement_ = std::move(measurement);
+  meas->covariance_ = std::move(measurement_covariance);
+  meas->update_vector_ = std::move(update_vector);
   meas->time_ = ros::to_timestamp_ns(time);
   meas->mahalanobis_thresh_ = mahalanobis_thresh;
   meas->latest_control_ = _latest_control;
@@ -847,8 +848,8 @@ void RosFilterBase::pose_callback(
       // Store the measurement. Add a "pose" suffix so we know what kind of
       // measurement we're dealing with when we debug the core filter logic.
       enqueue_measurement(
-        topic_name, measurement, measurement_covariance,
-        update_vector_corrected,
+        topic_name, std::move(measurement), std::move(measurement_covariance),
+        std::move(update_vector_corrected),
         callback_data.rejection_threshold_, msg->header.stamp);
 
       RF_DEBUG("Enqueued new measurement for " << topic_name << "\n");
@@ -943,8 +944,8 @@ void RosFilterBase::twist_callback(
       // Store the measurement. Add a "twist" suffix so we know what kind of
       // measurement we're dealing with when we debug the core filter logic.
       enqueue_measurement(
-        topic_name, measurement, measurement_covariance,
-        update_vector_corrected,
+        topic_name, std::move(measurement), std::move(measurement_covariance),
+        std::move(update_vector_corrected),
         callback_data.rejection_threshold_, msg->header.stamp);
 
       RF_DEBUG("Enqueued new measurement for " << topic_name << "_twist\n");
@@ -1055,7 +1056,7 @@ void RosFilterBase::aggregate_diagnostics(
 }
 
 void RosFilterBase::copy_covariance(
-  const double * arr, Eigen::MatrixXd & covariance,
+  const double * arr, Eigen::Ref<Eigen::MatrixXd> covariance,
   const std::string & topic_name,
   const std::vector<bool> & update_vector,
   const size_t offset, const size_t dimension)
@@ -1110,7 +1111,7 @@ void RosFilterBase::copy_covariance(
 }
 
 void RosFilterBase::copy_covariance(
-  const Eigen::MatrixXd & covariance, double * arr,
+  const Eigen::Ref<const Eigen::MatrixXd> & covariance, double * arr,
   const size_t dimension)
 {
   for (size_t i = 0; i < dimension; i++) {
@@ -1157,8 +1158,7 @@ bool RosFilterBase::prepare_acceleration(
     update_vector[StateMemberAz]);
 
   // 3. We'll need to rotate the covariance as well
-  Eigen::MatrixXd covariance_rotated(ACCELERATION_SIZE, ACCELERATION_SIZE);
-  covariance_rotated.setZero();
+  Eigen::Matrix3d covariance_rotated = Eigen::Matrix3d::Zero();
 
   this->copy_covariance(
     &(msg->linear_acceleration_covariance[0]),
@@ -1267,8 +1267,7 @@ bool RosFilterBase::prepare_acceleration(
     // upper-left and lower-right quadrants, and zeros
     // elsewhere
     tf2::Matrix3x3 rot(target_frame_trans.getRotation());
-    Eigen::MatrixXd rot3d(ACCELERATION_SIZE, ACCELERATION_SIZE);
-    rot3d.setIdentity();
+    Eigen::Matrix3d rot3d = Eigen::Matrix3d::Identity();
 
     for (size_t r_ind = 0; r_ind < ACCELERATION_SIZE; ++r_ind) {
       rot3d(r_ind, 0) = rot.getRow(r_ind).getX();
@@ -1487,8 +1486,7 @@ bool RosFilterBase::prepare_pose(
 
     // 5a. We'll need to rotate the covariance as well. Create a container and
     // copy over the covariance data
-    Eigen::MatrixXd covariance(POSE_SIZE, POSE_SIZE);
-    covariance.setZero();
+    Matrix6d covariance = Matrix6d::Zero();
     copy_covariance(
       &(msg->pose.covariance[0]), covariance, topic_name,
       update_vector, POSITION_OFFSET, POSE_SIZE);
@@ -1497,9 +1495,8 @@ bool RosFilterBase::prepare_pose(
     // contains a 3D rotation matrix in the upper-left and lower-right
     // quadrants, with zeros elsewhere.
     tf2::Matrix3x3 rot;
-    Eigen::MatrixXd rot6d(POSE_SIZE, POSE_SIZE);
-    rot6d.setIdentity();
-    Eigen::MatrixXd covariance_rotated;
+    Matrix6d rot6d = Matrix6d::Identity();
+    Matrix6d covariance_rotated;
 
     // Transform pose covariance due to a different pose source origin
     if (can_src_transform) {
@@ -1686,7 +1683,7 @@ bool RosFilterBase::prepare_pose(
         // into the target frame, and add the current measurement's rotated
         // covariance to the previous measurement's rotated covariance, and
         // multiply by the time delta.
-        Eigen::MatrixXd prev_covar_rotated =
+        const Matrix6d prev_covar_rotated =
           rot6d * previous_measurement_covariances_[topic_name] *
           rot6d.transpose();
         covariance_rotated =
@@ -1820,8 +1817,7 @@ bool RosFilterBase::prepare_twist(
     update_vector[StateMemberVyaw]);
 
   // 3. We'll need to rotate the covariance as well
-  Eigen::MatrixXd covariance_rotated(TWIST_SIZE, TWIST_SIZE);
-  covariance_rotated.setZero();
+  Matrix6d covariance_rotated = Matrix6d::Zero();
 
   copy_covariance(
     &(msg->twist.covariance[0]), covariance_rotated, topic_name,
@@ -1881,8 +1877,7 @@ bool RosFilterBase::prepare_twist(
     // upper-left and lower-right quadrants, and zeros
     // elsewhere
     tf2::Matrix3x3 rot(target_frame_trans.getRotation());
-    Eigen::MatrixXd rot6d(TWIST_SIZE, TWIST_SIZE);
-    rot6d.setIdentity();
+    Matrix6d rot6d = Matrix6d::Identity();
 
     for (size_t r_ind = 0; r_ind < POSITION_SIZE; ++r_ind) {
       rot6d(r_ind, 0) = rot.getRow(r_ind).getX();
