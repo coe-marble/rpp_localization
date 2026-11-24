@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -650,8 +651,9 @@ private:
     }
   }
 
+  template <typename History>
   static const PredictionEvent* find_covering_prediction(
-    const std::vector<HistoryEvent>& history,
+    const History& history,
     const std::size_t from_index,
     const rpp_localization::TimestampNs timestamp)
   {
@@ -786,7 +788,7 @@ private:
   std::unique_ptr<rpp_localization::plugins::detail::NavModel15Adapter> model_runtime_;
   std::unique_ptr<rpp_localization::FilterBase> filter_;
   Checkpoint initial_checkpoint_;
-  std::vector<HistoryEvent> history_;
+  std::deque<HistoryEvent> history_;
   rpp_localization::TimestampNs reference_time_{0};
   rpp_localization::TimestampNs initial_reference_time_{0};
   const rpp::ComponentContext* context_{nullptr};

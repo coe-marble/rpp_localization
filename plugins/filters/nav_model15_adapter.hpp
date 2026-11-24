@@ -106,12 +106,17 @@ public:
     const TimestampNs reference_time,
     const DurationNs delta) override
   {
+    const bool state_only = !_compute_covariance;
     NavModel15::LocalizationModelPredictInput15 input;
     write_state(input.state(), state);
-    write_covariance(input.covariance(), covariance);
+    if (!state_only)
+    {
+      write_covariance(input.covariance(), covariance);
+    }
     write_control(input.control());
     input.referenceTimeNs() = reference_time;
     input.deltaNs() = delta;
+    input.stateOnly() = state_only;
 
     const auto output = model_->predict(std::move(input));
     const auto status = output.status();
@@ -121,12 +126,12 @@ public:
     }
 
     const auto state_values = output.state().values();
-    const auto covariance_values = output.covariance().values();
     if (!has_finite_values(state_values, k_state_size))
     {
       throw ModelPredictionError(k_numerical_failure, "NavModel15 returned an invalid state");
     }
-    if (!has_valid_state_covariance(covariance_values))
+    const auto covariance_values = output.covariance().values();
+    if (!state_only && !has_valid_state_covariance(covariance_values))
     {
       throw ModelPredictionError(k_numerical_failure, "NavModel15 returned an invalid covariance");
     }
@@ -134,6 +139,10 @@ public:
     for (std::size_t index = 0; index < k_state_size; ++index)
     {
       state(static_cast<Eigen::Index>(index)) = state_values[index];
+    }
+    if (state_only)
+    {
+      return;
     }
     for (std::size_t row = 0; row < k_state_size; ++row)
     {

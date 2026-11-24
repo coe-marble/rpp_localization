@@ -174,4 +174,49 @@ TEST(LocalizationLifecycle, DisabledControlAxesPreserveMeasuredAcceleration)
   }
 }
 
+TEST(LocalizationLifecycle, StateOnlyPredictionMatchesFullPredictionState)
+{
+  rpp::RppDataManager data_manager(rpp::RPP_HOME, RPP_LOCALIZATION_SOURCE_DIR);
+  rpp::ComponentRuntimeBuilder builder(data_manager);
+  auto runtime = builder.build_component({
+    std::string(RPP_LOCALIZATION_SOURCE_DIR) +
+      "/.rppws/parts/rpp_localization__ekf15/11111111-1111-4111-8111-111111111111/"
+      "subcomponents/11111111-1111-4111-8111-111111111112",
+    "rpp_localization::ConstantAccelerationModel15"});
+  ASSERT_TRUE(runtime.configure().success);
+  ASSERT_TRUE(runtime.activate().success);
+  auto model = runtime.get_instance<rpp_localization::NavModel15>();
+
+  const auto predict = [&model](const bool state_only)
+  {
+    rpp_localization::NavModel15::LocalizationModelPredictInput15 input;
+    auto state = input.state().values();
+    state.resize(k_state_size);
+    for (std::size_t index = 0; index < k_state_size; ++index) {
+      state[index] = 0.1 * static_cast<double>(index + 1);
+    }
+    if (!state_only) {
+      auto covariance = input.covariance().values();
+      covariance.resize(k_state_size * k_state_size);
+      for (std::size_t index = 0; index < k_state_size; ++index) {
+        covariance[index * k_state_size + index] = 1.0;
+      }
+    }
+    input.control().present() = false;
+    input.referenceTimeNs() = 100'000'000;
+    input.deltaNs() = 50'000'000;
+    input.stateOnly() = state_only;
+    return model->predict(std::move(input));
+  };
+
+  const auto full = predict(false);
+  const auto state_only = predict(true);
+  ASSERT_EQ(full.status().code(), 0);
+  ASSERT_EQ(state_only.status().code(), 0);
+  EXPECT_EQ(state_only.covariance().values().size(), 0u);
+  for (std::size_t index = 0; index < k_state_size; ++index) {
+    EXPECT_DOUBLE_EQ(state_only.state().values()[index], full.state().values()[index]);
+  }
+}
+
 }  // namespace
