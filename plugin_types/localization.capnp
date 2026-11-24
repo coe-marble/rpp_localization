@@ -81,6 +81,8 @@ struct LocalizationModelPredictInput15 {
   control @2 :Control6;
   referenceTimeNs @3 :Int64;
   deltaNs @4 :Int64;
+  # Predict the state only; covariance is neither read nor returned.
+  stateOnly @5 :Bool;
 }
 
 struct LocalizationModelPredictOutput15 {

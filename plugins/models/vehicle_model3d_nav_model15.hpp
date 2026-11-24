@@ -105,7 +105,8 @@ public:
   LocalizationModelPredictOutput15::Const predict(LocalizationModelPredictInput15::Const input) override
   {
     LocalizationModelPredictOutput15 output;
-    write_zero_output(output);
+    const bool state_only = input.stateOnly();
+    write_zero_output(output, !state_only);
     if (!ready_ || !vehicle_model_)
     {
       set_status(output, k_not_initialized, "VehicleModel3D bridge is not initialized");
@@ -119,7 +120,7 @@ public:
 
     rpp_localization::StateVector state(k_state_size);
     rpp_localization::CovarianceMatrix covariance(k_state_size, k_state_size);
-    const auto state_validation = read_state_and_covariance(input, state, covariance);
+    const auto state_validation = read_state_and_covariance(input, state, covariance, !state_only);
     if (state_validation.code != k_ok)
     {
       set_status(output, state_validation.code, state_validation.message);
@@ -134,11 +135,23 @@ public:
       return output;
     }
 
-    write_output(output, state, covariance);
+    write_output(output, state, covariance, !state_only);
     try
     {
       const auto propagated = propagate_state(
         state, control, input.referenceTimeNs(), input.deltaNs());
+      if (state_only)
+      {
+        if (!propagated.allFinite())
+        {
+          set_status(output, k_numerical_failure,
+            "VehicleModel3D bridge produced an invalid state");
+          return output;
+        }
+        write_output(output, propagated, covariance, false);
+        set_status(output, k_ok, "");
+        return output;
+      }
       const auto transition = numerical_transition(
         state, propagated, control, input.referenceTimeNs(), input.deltaNs());
       rpp_localization::CovarianceMatrix propagated_covariance =
@@ -263,13 +276,22 @@ private:
   static ValidationResult read_state_and_covariance(
     const Input& input,
     rpp_localization::StateVector& state,
-    rpp_localization::CovarianceMatrix& covariance)
+    rpp_localization::CovarianceMatrix& covariance,
+    const bool with_covariance = true)
   {
     const auto state_values = input.state().values();
     const auto covariance_values = input.covariance().values();
     if (!has_finite_values(state_values, k_state_size))
     {
       return {k_invalid_state, "state must contain 15 finite values"};
+    }
+    if (!with_covariance)
+    {
+      for (std::size_t index = 0; index < k_state_size; ++index)
+      {
+        state(static_cast<Eigen::Index>(index)) = state_values[index];
+      }
+      return {k_ok, ""};
     }
     if (!has_finite_values(covariance_values, k_covariance_size))
     {
@@ -524,10 +546,19 @@ private:
   static void write_output(
     LocalizationModelPredictOutput15& output,
     const rpp_localization::StateVector& state,
-    const rpp_localization::CovarianceMatrix& covariance)
+    const rpp_localization::CovarianceMatrix& covariance,
+    const bool with_covariance = true)
   {
     auto state_values = output.state().values();
     state_values.resize(k_state_size);
+    if (!with_covariance)
+    {
+      for (std::size_t index = 0; index < k_state_size; ++index)
+      {
+        state_values[index] = state(static_cast<Eigen::Index>(index));
+      }
+      return;
+    }
     auto covariance_values = output.covariance().values();
     covariance_values.resize(k_covariance_size);
     for (std::size_t row = 0; row < k_state_size; ++row)
@@ -541,11 +572,13 @@ private:
     }
   }
 
-  static void write_zero_output(LocalizationModelPredictOutput15& output)
+  static void write_zero_output(
+    LocalizationModelPredictOutput15& output, const bool with_covariance = true)
   {
     write_output(output,
       rpp_localization::StateVector::Zero(k_state_size),
-      rpp_localization::CovarianceMatrix::Zero(k_state_size, k_state_size));
+      rpp_localization::CovarianceMatrix::Zero(k_state_size, k_state_size),
+      with_covariance);
   }
 
   static void set_status(
