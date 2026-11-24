@@ -92,6 +92,9 @@ public:
   //! distance, for outlier rejection
   //! @param[in] time - The time of arrival (in seconds)
   //!
+  //! @note measurement, measurement_covariance and update_vector are moved into the queue.
+  //! Pass them with std::move and do not use them after the call.
+  //!
   void enqueue_measurement(
     const std::string & topic_name,
     Eigen::VectorXd measurement,
