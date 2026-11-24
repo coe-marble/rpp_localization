@@ -107,6 +107,12 @@ if(BUILD_TESTING)
   ament_add_gtest(test_core_compatibility test/test_core_compatibility.cpp)
   target_link_libraries(test_core_compatibility rpp_localization::numerics)
 
+  ament_add_gtest(test_ekf_correct test/test_ekf_correct.cpp)
+  target_link_libraries(test_ekf_correct rpp_localization::numerics)
+
+  add_executable(benchmark_ekf_correct test/benchmark_ekf_correct.cpp)
+  target_link_libraries(benchmark_ekf_correct rpp_localization::numerics)
+
   ament_add_gtest(test_ros_parameters test/test_ros_parameters.cpp)
   target_link_libraries(test_ros_parameters ${core_library_name})
 
