@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -573,10 +574,11 @@ private:
       });
     const auto insertion_index = static_cast<std::size_t>(
       std::distance(history_.begin(), insertion));
-    // Keep committed checkpoints untouched until the entire replay succeeds.
-    auto replay_history = history_;
-    replay_history.insert(replay_history.begin() + static_cast<std::ptrdiff_t>(insertion_index),
-      HistoryEvent::measurement(measurement));
+    // Replay a copy of the tail only; history_ stays untouched until replay succeeds.
+    std::vector<HistoryEvent> replay_history;
+    replay_history.reserve(history_.size() - insertion_index + 1);
+    replay_history.push_back(HistoryEvent::measurement(measurement));
+    replay_history.insert(replay_history.end(), insertion, history_.end());
     const auto checkpoint = insertion_index == 0 ? initial_checkpoint_ :
       history_[insertion_index - 1].checkpoint;
     const auto checkpoint_time = insertion_index == 0 ? initial_reference_time_ :
@@ -593,7 +595,7 @@ private:
       restore_runtime(checkpoint.state, checkpoint.covariance, checkpoint.control);
       filter_ = checkpoint.filter->clone();
       reference_time_ = checkpoint_time;
-      for (std::size_t index = insertion_index; index < replay_history.size(); ++index)
+      for (std::size_t index = 0; index < replay_history.size(); ++index)
       {
         auto& event = replay_history[index];
         if (event.kind == HistoryEvent::Kind::k_prediction)
@@ -633,7 +635,10 @@ private:
         event.checkpoint = capture_checkpoint();
       }
 
-      history_ = std::move(replay_history);
+      history_.erase(history_.begin() + static_cast<std::ptrdiff_t>(insertion_index),
+        history_.end());
+      history_.insert(history_.end(), std::make_move_iterator(replay_history.begin()),
+        std::make_move_iterator(replay_history.end()));
       prune_history();
       return true;
     }
