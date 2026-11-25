@@ -29,6 +29,9 @@ import parity_metrics  # noqa: E402
 _DIRECTORY = Path(__file__).resolve().parent
 _BAG_RATE = float(os.environ.get("PARITY_BAG_RATE", "1.0"))
 _CLOCK_HZ = os.environ.get("PARITY_CLOCK_HZ", "1000")
+# robot_localization replays late measurements only with smooth_lagged_data; ours always does.
+_RL_REPLAY = os.environ.get("PARITY_RL_REPLAY", "0") == "1"
+_RL_REPLAY_PARAMETERS = {"smooth_lagged_data": True, "history_length": 1.0} if _RL_REPLAY else {}
 
 _POSITION_RMS_LIMIT_M = {"ekf": 0.02, "ukf": 0.3}
 _YAW_RMS_LIMIT_DEG = {"ekf": 0.1, "ukf": 1.0}
@@ -92,7 +95,7 @@ def generate_test_description(bag, filter_type):
         executable=f"{filter_type}_node",
         name="filter",
         namespace="robot_localization",
-        parameters=[parameters],
+        parameters=[parameters | _RL_REPLAY_PARAMETERS],
         output="log",
     )
     # robot_localization is a lifecycle node from 3.11.
@@ -172,7 +175,7 @@ class TestRobotLocalizationParity(unittest.TestCase):
         cls.fixes.append((stamp.sec + stamp.nanosec * 1e-9, message.latitude, message.longitude))
 
     def _record_until_bag_ends(self, proc_info, bag_player) -> None:
-        deadline = time.monotonic() + 600.0
+        deadline = time.monotonic() + 600.0 / _BAG_RATE
         while time.monotonic() < deadline:
             for _ in range(100):
                 rclpy.spin_once(self.node, timeout_sec=0.01)
@@ -202,6 +205,7 @@ class TestRobotLocalizationParity(unittest.TestCase):
             "bag": bag,
             "filter": filter_type,
             "bag_rate": _BAG_RATE,
+            "robot_localization_replay": _RL_REPLAY,
             "robot_localization_version": ".".join(map(str, _robot_localization_version())),
             "expected_final_position": list(expected),
             "upstream_tolerance_m": tolerance,

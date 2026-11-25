@@ -316,4 +316,30 @@ TEST(LocalizationFilter15PluginBoundary, ReplaysOnlyTheSuffixAndRejectsExpiredHi
   EXPECT_EQ(model->prediction_count_ - before, 2u);
 }
 
+TEST(LocalizationFilter15PluginBoundary, KeepsReplayedEventsInHistoryOrder)
+{
+  auto model = std::make_shared<FakeNavModel15>();
+  BoundaryEkf15 filter;
+  filter.initialize_with(model);
+  ASSERT_EQ(filter.initialize(std::move(make_estimate(0))).code(), 0);
+  for (std::int64_t step = 1; step <= 3; ++step)
+  {
+    rpp_localization::LocalizationFilter15::LocalizationPredictInput15 input;
+    input.referenceTimeNs() = step * 10;
+    input.deltaNs() = 10;
+    input.control().present() = false;
+    ASSERT_EQ(filter.predict(std::move(input)).status().code(), 0);
+  }
+
+  auto first = model->prediction_count_;
+  ASSERT_EQ(filter.correct(std::move(make_measurement(29, 2.0, 1.0))).status().code(), 0);
+  EXPECT_EQ(model->prediction_count_ - first, 2u);
+
+  // Replays the older measurement, the one at 29 and the prediction at 30.
+  first = model->prediction_count_;
+  ASSERT_EQ(filter.correct(std::move(make_measurement(25, 2.0, 1.0))).status().code(), 0);
+  EXPECT_EQ(model->prediction_count_ - first, 3u);
+  EXPECT_EQ(filter.getEstimate().estimate().referenceTimeNs(), 30);
+}
+
 }  // namespace
