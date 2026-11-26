@@ -1,0 +1,78 @@
+{
+  "ScriptName": "navigation_estimation",
+  "ScriptLibrary": "rpp_localization",
+  "ScriptPath": "include/rpp_localization/estimation/localization_script.hpp",
+  "Language": "cpp",
+  "Spec": {
+    "estimator": "rpp_interfaces::Estimator"
+  },
+  "Configurations": {
+    "ekf": {
+      "Description": "Navigation composition with prepared observation subsets",
+      "Components": {
+        "estimator": [
+          {
+            "Id": "55555555-5555-4555-8555-555555555555",
+            "PluginName": "rpp_localization::Ekf"
+          }
+        ]
+      }
+    },
+    "ukf": {
+      "Description": "Navigation composition with prepared observation subsets",
+      "Components": {
+        "estimator": [
+          {
+            "Id": "66666666-6666-4666-8666-666666666666",
+            "PluginName": "rpp_localization::Ukf"
+          }
+        ]
+      }
+    },
+    "ekf_2d": {
+      "Description": "Planar navigation with prepared constraint/subset ports",
+      "Components": {
+        "estimator": [
+          {
+            "Id": "77777777-7777-4777-8777-777777777777",
+            "PluginName": "rpp_localization::Ekf"
+          }
+        ]
+      }
+    },
+    "ukf_2d": {
+      "Description": "Planar navigation with prepared constraint/subset ports",
+      "Components": {
+        "estimator": [
+          {
+            "Id": "88888888-8888-4888-8888-888888888888",
+            "PluginName": "rpp_localization::Ukf"
+          }
+        ]
+      }
+    },
+    "ekf_control": {
+      "Description": "Navigation composition with prepared command acceleration inputs",
+      "Components": {
+        "estimator": [
+          {
+            "Id": "99999999-9999-4999-8999-999999999999",
+            "PluginName": "rpp_localization::Ekf"
+          }
+        ]
+      }
+    },
+    "ukf_control": {
+      "Description": "Navigation composition with prepared command acceleration inputs",
+      "Components": {
+        "estimator": [
+          {
+            "Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "PluginName": "rpp_localization::Ukf"
+          }
+        ]
+      }
+    }
+  },
+  "ActiveConfiguration": "ekf"
+}

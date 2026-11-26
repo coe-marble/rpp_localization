@@ -8,11 +8,16 @@ for package in rpp_common rpp_plugin_registrator rpp_orchestrator rpp_py rpp_cli
   python -m pip install --no-deps -e "rpp_dev/src/$package"
 done
 
-colcon build --base-paths rpp_dev/src/rpp_cpp rpp_dev/src/rpp_ros2 \
+colcon build --base-paths rpp_dev/src/rpp_cpp rpp_dev/src/rpp_ros2 libraries/rpp_ros_interfaces \
   --symlink-install --cmake-args -DBUILD_TESTING=OFF \
   -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python
 source install/setup.bash
 rpp init-home
+
+rpp library register "$PWD/rpp_dev/src/rpp_interfaces" --link
+colcon build --base-paths rpp_dev/src/rpp_interfaces --symlink-install --cmake-args \
+  -DBUILD_TESTING=OFF -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python
+source install/setup.bash
 
 rpp library register "$PWD/libraries/rpp_localization" --link
 

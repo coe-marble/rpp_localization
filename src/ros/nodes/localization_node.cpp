@@ -1,17 +1,15 @@
-#include <memory>
+#include <rpp_localization/ros/estimator_script_node.hpp>
 
-#include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/ros/ros_filter.hpp"
-
-int main(int argc, char ** argv)
+int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::NodeOptions options;
-  options.arguments({"localization_node"});
-  auto node = std::make_shared<rpp_localization::RosFilter>(options);
-
-  node->init();
-  rclcpp::spin(node->get_node_base_interface());
-  rclcpp::shutdown();
-  return 0;
+  try {
+    auto node = std::make_shared<rpp_localization::EstimatorScriptNode>();
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(node); executor.spin();
+  } catch (const std::exception& error) {
+    RCLCPP_ERROR(rclcpp::get_logger("estimator_script"), "%s", error.what());
+    rclcpp::shutdown(); return 1;
+  }
+  rclcpp::shutdown(); return 0;
 }

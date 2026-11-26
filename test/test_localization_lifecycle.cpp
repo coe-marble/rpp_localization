@@ -69,7 +69,7 @@ TEST(LocalizationLifecycle, ConfiguresActivatesAndDeactivatesTheFilterTree)
   EXPECT_EQ(filter->predict(std::move(make_prediction())).status().code(), 0);
 
   const auto stopped = filter_context.deactivate();
-  ASSERT_TRUE(stopped.result.success);
+  ASSERT_TRUE(stopped.success);
   EXPECT_FALSE(filter_context.is_active());
   EXPECT_EQ(filter->getEstimate().status().code(), 5);
 
@@ -77,7 +77,7 @@ TEST(LocalizationLifecycle, ConfiguresActivatesAndDeactivatesTheFilterTree)
   EXPECT_EQ(filter->initialize(std::move(make_estimate())).code(), 0);
 
   const auto stopped_again = filter_context.deactivate();
-  ASSERT_TRUE(stopped_again.result.success);
+  ASSERT_TRUE(stopped_again.success);
   ASSERT_TRUE(runtime.cleanup().success);
 }
 
@@ -121,7 +121,7 @@ TEST(LocalizationLifecycle, ScriptCanWaitForExternalActivationOrActivateByDefaul
       EXPECT_EQ(filter->initialize(std::move(make_estimate())).code(), 0);
       EXPECT_EQ(filter->predict(std::move(make_prediction())).status().code(), 0);
     }
-    ASSERT_TRUE(filter_context.deactivate().result.success);
+    ASSERT_TRUE(filter_context.deactivate().success);
     EXPECT_FALSE(script.is_active());
     ASSERT_TRUE(runtime.cleanup().success);
   }

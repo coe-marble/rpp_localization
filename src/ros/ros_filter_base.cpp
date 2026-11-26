@@ -565,6 +565,10 @@ void RosFilterBase::imu_callback(
 
 void RosFilterBase::integrate_measurements(const rclcpp::Time & current_time)
 {
+  // Match the generic worker's estimation batch: include replay/history work,
+  // exclude ROS ingress, conversion and publication. Omit the cold initial batch.
+  BenchmarkTiming::Scope batch(benchmark_, BenchmarkTiming::Operation::Estimation,
+    rpp_filter_initialized_);
   RF_DEBUG(
     "------ RosFilterBase::integrate_measurements ------\n\n"
     "Integration time is " <<
@@ -691,11 +695,11 @@ void RosFilterBase::integrate_measurements(const rclcpp::Time & current_time)
     rclcpp::Duration ros_last_update_delta =
       ros::to_ros_duration(last_update_delta);
     validate_rpp_filter_delta(ros_last_update_delta);
-    predict_rpp_filter(current_time_ns, ros_last_update_delta.nanoseconds());
-
-    // Update the last measurement time and last update time
-    set_rpp_filter_last_measurement_time(
-      rpp_filter_last_measurement_time() + last_update_delta);
+    if (predict_rpp_filter(current_time_ns, ros_last_update_delta.nanoseconds())) {
+      // Advance the timestamp only after a successful prediction.
+      set_rpp_filter_last_measurement_time(
+        rpp_filter_last_measurement_time() + last_update_delta);
+    }
   }
 
   RF_DEBUG("\n----- /RosFilterBase::integrate_measurements ------\n");
@@ -2097,7 +2101,10 @@ bool RosFilterBase::revert_to(const TimestampNs time)
     "\nRequested time was " << std::setprecision(20) <<
       nanoseconds_to_seconds(time) << "\n")
 
-  // size_t history_size = filter_state_history_.size();
+  [[maybe_unused]] std::size_t history_size = 0;
+  if constexpr (benchmark_metrics_compiled) {
+    if (benchmark_.enabled()) {history_size = filter_state_history_.size();}
+  }
 
   // Walk back through the queue until we reach a filter state whose time stamp
   // is less than or equal to the requested time. Since every saved state after
@@ -2109,6 +2116,12 @@ bool RosFilterBase::revert_to(const TimestampNs time)
   {
     last_history_state = filter_state_history_.back();
     filter_state_history_.pop_back();
+  }
+
+  if constexpr (benchmark_metrics_compiled) {
+    if (benchmark_.enabled()) {
+      benchmark_.replayed_states(history_size - filter_state_history_.size());
+    }
   }
 
   // If the state history is not empty at this point, it means that our history
@@ -2283,6 +2296,23 @@ void RosFilterBase::load_filter_params()
 
   // Update frequency and sensor timeout
   this->frequency_ = this->declare_parameter("frequency", 30.0);
+
+  const bool profile = declare_parameter("benchmark.enabled", false);
+  if (profile) {
+    if (!benchmark_metrics_compiled) {
+      throw std::invalid_argument("Benchmark metrics require RPP_LOCALIZATION_ENABLE_BENCHMARK_METRICS=ON");
+    }
+    if (!std::isfinite(frequency_) || frequency_ <= 0.0 || frequency_ > 1e9) {
+      throw std::invalid_argument("Benchmark frequency must be positive and finite, at most 1 GHz");
+    }
+    benchmark_.configure(true, static_cast<std::uint64_t>(1e9 / frequency_));
+    benchmark_service_ = create_service<std_srvs::srv::Trigger>("~/benchmark_stats",
+      [this](std_srvs::srv::Trigger::Request::SharedPtr,
+        std_srvs::srv::Trigger::Response::SharedPtr response) {
+        // The legacy node uses a SingleThreadedExecutor, including this service.
+        response->success = true; response->message = benchmark_.json();
+      });
+  }
 
   this->predict_to_current_time_ = rclcpp::Node::declare_parameter<bool>("predict_to_current_time", false);
 
@@ -2566,7 +2596,7 @@ void RosFilterBase::initialize_rpp_filter()
   rpp::ComponentRuntimeBuilder runtime_builder(data_manager);
   const std::optional<std::string> selected_configuration = configuration.empty() ?
     std::nullopt : std::optional<std::string>(configuration);
-  rpp_runtime_ = std::make_unique<rpp::ScriptRuntime<>>(
+  rpp_runtime_ = std::make_unique<rpp::ScriptRuntime>(
     runtime_builder.build_script({
       rpp::LibraryScript{script.library, script.name}, selected_configuration, std::nullopt}));
   rpp_runtime_->configure().require_success("Localization script configuration");
@@ -2575,7 +2605,7 @@ void RosFilterBase::initialize_rpp_filter()
   // Root configuration and filter activation remain owned by RosFilterBase.
   // This helper exposes only the already-built runtime's declared slots via ROS.
   rpp_slot_manager_ros_ =
-    std::make_unique<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime<>>>(*this, *rpp_runtime_);
+    std::make_unique<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime>>(*this, *rpp_runtime_);
 }
 
 void RosFilterBase::reset_rpp_filter()
@@ -2659,7 +2689,10 @@ void RosFilterBase::correct_rpp_filter(const Measurement & measurement)
     rpp_remote_reset_required_ = false;
   }
 
-  const auto result = filter->correct(std::move(make_measurement(measurement)));
+  const auto result = [&] {
+    BenchmarkTiming::Scope scope(benchmark_, BenchmarkTiming::Operation::Correct);
+    return filter->correct(std::move(make_measurement(measurement)));
+  }();
   if (result.status().code() == 6) {
     RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,
       "Dropping stale measurement from " << measurement.topic_name_ << ": " <<
@@ -2705,8 +2738,11 @@ bool RosFilterBase::predict_rpp_filter(
     rpp_remote_reset_required_ = false;
   }
 
-  const auto result = filter->predict(std::move(make_prediction_input(
-    rpp_control_, rpp_control_update_vector_, rpp_use_control_, reference_time, delta)));
+  const auto result = [&] {
+    BenchmarkTiming::Scope scope(benchmark_, BenchmarkTiming::Operation::Predict);
+    return filter->predict(std::move(make_prediction_input(
+      rpp_control_, rpp_control_update_vector_, rpp_use_control_, reference_time, delta)));
+  }();
   if (result.status().code() != 0)
   {
     RCLCPP_WARN_STREAM_THROTTLE(get_logger(), *get_clock(), 5000,

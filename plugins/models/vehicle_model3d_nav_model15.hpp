@@ -97,7 +97,7 @@ public:
       return rpp::CallbackResult::failure(
         "VehicleModel3DNavModel15 must be configured before deactivation");
     }
-    return context_->get_subcomponent_context("vehicle_model").deactivate().result;
+    return context_->get_subcomponent_context("vehicle_model").deactivate();
   }
 
   void reset() override {}

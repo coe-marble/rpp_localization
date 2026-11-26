@@ -21,10 +21,11 @@
 #include "geometry_msgs/msg/twist_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/srv/toggle_filter_processing.hpp"
-#include "rpp_localization/srv/set_pose.hpp"
+#include "rpp_ros_interfaces/srv/toggle_filter_processing.hpp"
+#include "rpp_ros_interfaces/srv/set_pose.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_srvs/srv/empty.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "tf2/LinearMath/Transform.hpp"
 #include "rpp_localization/ros/tf_buffer_wrapper.hpp"
 
@@ -32,6 +33,7 @@
 #include "rpp_localization/ros/localization_script.hpp"
 #include "rpp_localization/ros/ros_filter_utilities.hpp"
 #include "rpp_localization/ros/time.hpp"
+#include "rpp_localization/ros/benchmark_timing.hpp"
 #include <rpp_cpp/runtime_fwd.hpp>
 #include <rpp_ros2/slot_manager_ros.hpp>
 
@@ -670,10 +672,12 @@ protected:
   std::unique_ptr<diagnostic_updater::Updater> diagnostic_updater_;
 
   std::string default_configuration_;
-  std::unique_ptr<rpp::ScriptRuntime<>> rpp_runtime_;
+  std::unique_ptr<rpp::ScriptRuntime> rpp_runtime_;
   // Declared after the runtime so it is destroyed first and never outlives it.
-  std::unique_ptr<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime<>>> rpp_slot_manager_ros_;
+  std::unique_ptr<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime>> rpp_slot_manager_ros_;
   std::unique_ptr<LocalizationScript> rpp_script_;
+  BenchmarkTiming benchmark_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr benchmark_service_;
   StateVector rpp_state_;
   CovarianceMatrix rpp_covariance_;
   // Reused transaction buffers for plugin estimates. A valid candidate swaps

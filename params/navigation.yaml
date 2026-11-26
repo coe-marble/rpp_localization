@@ -1,0 +1,33 @@
+estimator_script:
+  ros__parameters:
+    script_library: rpp_localization
+    script_name: navigation_estimation
+    configuration: ekf
+    activate_on_start: true
+    expose_navigation_topics: true
+    frequency: 100.0
+    publish_frequency: 30.0
+    queue_capacity: 128
+    replay_execution: ros
+    replay_queue_capacity: 4096
+    replay_events_per_tick: 64
+    predict_to_current_time: true
+    initialize_from_measurement: true
+    process_noise_density:
+      [0.05, 0.05, 0.06, 0.03, 0.03, 0.06,
+       0.025, 0.025, 0.04, 0.01, 0.01, 0.02, 0.01, 0.01, 0.015]
+    navigation.resource: base
+    navigation.two_d_mode: false
+    navigation.publish_tf: false
+    navigation.publish_acceleration: false
+    navigation.publish_control_state: true
+    navigation.control_state_dimensions: 2
+    navigation.permit_corrected_publication: false
+    navigation.odometry_topic: odometry/input
+    navigation.pose_topic: pose/input
+    navigation.twist_topic: twist/input
+    navigation.imu_topic: imu/data
+    navigation.imu_world_frame: map
+    navigation.remove_gravity: false
+    navigation.use_control: false
+    navigation.dynamic_process_noise: false

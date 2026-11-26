@@ -17,6 +17,7 @@
 #include "rpp_localization/core/model_base.hpp"
 #include "rpp_localization/core/validation.hpp"
 #include "rpp_localization/filters/extended_kalman_filter.hpp"
+#include "rpp_localization/filters/unscented_kalman_filter.hpp"
 
 namespace
 {
@@ -87,6 +88,25 @@ Measurement make_measurement(const std::vector<bool>& update_vector)
   measurement.measurement_(StateMemberYaw) = -3.1;
   measurement.covariance_ = spd(0.05, 7);
   return measurement;
+}
+
+// Exercise first use and reuse of each width with different selected axes.
+std::vector<Measurement> workspace_measurements()
+{
+  std::vector<Measurement> measurements;
+  for (int width = 0; width <= STATE_SIZE; ++width) {
+    for (const bool reverse : {false, true}) {
+      std::vector<bool> update_vector(STATE_SIZE, false);
+      for (int index = 0; index < width; ++index) {
+        const int axis = reverse ? STATE_SIZE - index - 1 : index;
+        update_vector[static_cast<std::size_t>(axis)] = true;
+      }
+      measurements.push_back(make_measurement(update_vector));
+    }
+  }
+  const auto forward = measurements;
+  measurements.insert(measurements.end(), forward.rbegin(), forward.rend());
+  return measurements;
 }
 
 void prepare(StaticModel& model)
@@ -171,6 +191,51 @@ TEST(EkfCorrect, PerformsNoHeapAllocations)
 
     EXPECT_EQ(g_allocations, 0u);
     EXPECT_FALSE(model.get_state().isApprox(before));
+  }
+}
+
+TEST(EkfCorrect, ReusesPreparedStorageAcrossMeasurementWidths)
+{
+  StaticModel model;
+  Ekf filter(model);
+  const auto measurements = workspace_measurements();
+  for (const auto& measurement : measurements) {
+    prepare(model);
+    g_allocations = 0;
+    g_count_allocations = true;
+    Eigen::internal::set_is_malloc_allowed(false);
+    EXPECT_NO_THROW(filter.correct(measurement));
+    Eigen::internal::set_is_malloc_allowed(true);
+    g_count_allocations = false;
+
+    EXPECT_EQ(g_allocations, 0u);
+  }
+}
+
+TEST(UkfWorkspace, PredictAndCorrectReusePreparedStorage)
+{
+  StaticModel model;
+  Ukf filter(model);
+  filter.initialize_runtime(CovarianceMatrix::Identity(STATE_SIZE, STATE_SIZE) * 0.01,
+    true, 0.001, 0.0, 2.0);
+  const auto measurements = workspace_measurements();
+  for (const auto& measurement : measurements) {
+    prepare(model);
+    g_allocations = 0;
+    g_count_allocations = true;
+    Eigen::internal::set_is_malloc_allowed(false);
+    EXPECT_NO_THROW({
+        filter.reset();
+        filter.correct(measurement);
+        filter.predict(100'000'000, 100'000'000);
+        filter.correct(measurement);
+      });
+    Eigen::internal::set_is_malloc_allowed(true);
+    g_count_allocations = false;
+
+    EXPECT_EQ(g_allocations, 0u);
+    EXPECT_TRUE(model.get_state().allFinite());
+    EXPECT_TRUE(model.get_state_covariance().allFinite());
   }
 }
 

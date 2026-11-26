@@ -109,10 +109,13 @@ public:
     initialize_with_model(std::move(model));
   }
 
+  std::size_t filter_creations{0};
+
 protected:
   std::unique_ptr<rpp_localization::FilterBase> create_filter(
     rpp_localization::ModelBase& model) override
   {
+    ++filter_creations;
     return std::make_unique<rpp_localization::Ekf>(model);
   }
 };
@@ -253,6 +256,23 @@ TEST(NavModel15Adapter, RejectsModelStatusAndInvalidCovariance)
   {
     EXPECT_EQ(error.code(), 9);
   }
+}
+
+TEST(LocalizationFilter15PluginBoundary, ReusesConfiguredFilterAcrossInitializationAndReset)
+{
+  BoundaryEkf15 filter;
+  filter.initialize_with(std::make_shared<FakeNavModel15>());
+  EXPECT_EQ(filter.filter_creations, 1u);
+  EXPECT_EQ(filter.getEstimate().status().code(), 5);
+
+  ASSERT_EQ(filter.initialize(std::move(make_estimate(10))).code(), 0);
+  filter.reset();
+  EXPECT_EQ(filter.getEstimate().status().code(), 5);
+  ASSERT_EQ(filter.initialize(std::move(make_estimate(20))).code(), 0);
+  ASSERT_EQ(filter.reset(std::move(make_estimate(30))).code(), 0);
+
+  EXPECT_EQ(filter.getEstimate().estimate().referenceTimeNs(), 30);
+  EXPECT_EQ(filter.filter_creations, 1u);
 }
 
 TEST(LocalizationFilter15PluginBoundary, PreservesStaleTimeAndCovarianceNormalization)

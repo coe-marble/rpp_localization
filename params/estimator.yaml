@@ -1,0 +1,18 @@
+estimator_script:
+  ros__parameters:
+    script_library: rpp_localization
+    script_name: localization_generic
+    configuration: ekf
+    activate_on_start: true
+    expose_navigation_topics: false
+    frequency: 100.0
+    publish_frequency: 30.0
+    queue_capacity: 128
+    replay_execution: ros
+    replay_queue_capacity: 4096
+    replay_events_per_tick: 64
+    predict_to_current_time: true
+    initialize_from_measurement: true
+    input_timeout_sec: 0.5
+    # Empty state/covariance parameters derive their widths from the estimator.
+    # Supply a diagonal or full row-major density in state tangent coordinates.

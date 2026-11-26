@@ -77,7 +77,9 @@ public:
 
   rpp::CallbackResult on_deactivate() override
   {
-    filter_.reset();
+    if (filter_) {
+      filter_->reset();
+    }
     filter_ready_ = false;
     history_.clear();
     initial_checkpoint_ = {};
@@ -86,12 +88,14 @@ public:
       return rpp::CallbackResult::failure(
         "LocalizationFilter15 must be configured before deactivation");
     }
-    return context_->get_subcomponent_context("model").deactivate().result;
+    return context_->get_subcomponent_context("model").deactivate();
   }
 
   void reset() override
   {
-    filter_.reset();
+    if (filter_) {
+      filter_->reset();
+    }
     filter_ready_ = false;
     reference_time_ = 0;
     initial_reference_time_ = 0;
@@ -106,7 +110,7 @@ public:
   LocalizationStatus::Const initialize(Estimate15::Const initial_estimate) override
   {
     LocalizationStatus status;
-    if (!component_ready_ || !model_runtime_)
+    if (!component_ready_ || !model_runtime_ || !filter_)
     {
       set_status(status, k_not_initialized, "NavModel15 component is not initialized");
       return status;
@@ -123,20 +127,7 @@ public:
 
     model_runtime_->set_state(state);
     model_runtime_->set_state_covariance(covariance);
-    try
-    {
-      filter_ = create_filter(*model_runtime_);
-    }
-    catch (const std::exception& error)
-    {
-      set_status(status, k_model_failure, error.what());
-      return status;
-    }
-    if (!filter_)
-    {
-      set_status(status, k_model_failure, "filter factory returned no runtime filter");
-      return status;
-    }
+    filter_->reset();
 
     reference_time_ = initial_estimate.referenceTimeNs();
     initial_reference_time_ = reference_time_;
@@ -305,6 +296,11 @@ protected:
     model_component_ = std::move(model);
     model_runtime_ = std::make_unique<rpp_localization::plugins::detail::NavModel15Adapter>(
       model_component_);
+    // Prepare all numerical storage during configuration, before activation.
+    filter_ = create_filter(*model_runtime_);
+    if (!filter_) {
+      throw std::runtime_error("filter factory returned no runtime filter");
+    }
     component_ready_ = true;
     filter_ready_ = false;
     reference_time_ = 0;

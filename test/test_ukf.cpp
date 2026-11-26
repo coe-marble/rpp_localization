@@ -206,6 +206,30 @@ TEST(UkfTest, unrelated_measurement_leaves_a_heading_on_the_branch_cut)
   EXPECT_GT(model.get_state_covariance()(StateMemberYaw, StateMemberYaw), 0.0);
 }
 
+TEST(UkfTest, reset_matches_a_fresh_filter)
+{
+  Eigen::VectorXd state = Eigen::VectorXd::Zero(STATE_SIZE);
+  state(StateMemberYaw) = 0.4;
+  state(StateMemberVx) = 1.0;
+  const Eigen::MatrixXd covariance = diagonal_covariance(0.02);
+  UkfUnderTest reused(state, covariance);
+  const auto measurement = measure({StateMemberX, StateMemberYaw}, {0.2, 0.45}, 0.01);
+
+  reused.filter.predict(100'000'000, 100'000'000);
+  // A fresh filter must regenerate sigma points from the posterior, including Q.
+  UkfUnderTest fresh(reused.model.get_state(), reused.model.get_state_covariance());
+  reused.filter.reset();
+
+  reused.filter.correct(measurement);
+  fresh.filter.correct(measurement);
+  reused.filter.predict(200'000'000, 100'000'000);
+  fresh.filter.predict(200'000'000, 100'000'000);
+
+  EXPECT_TRUE(reused.model.get_state().isApprox(fresh.model.get_state(), 1e-12));
+  EXPECT_TRUE(reused.model.get_state_covariance().isApprox(
+    fresh.model.get_state_covariance(), 1e-12));
+}
+
 TEST(UkfTest, prediction_survives_a_slightly_indefinite_covariance)
 {
   Eigen::VectorXd state = Eigen::VectorXd::Zero(STATE_SIZE);

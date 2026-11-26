@@ -32,6 +32,9 @@ public:
   virtual void correct(const Measurement& measurement) = 0;
   virtual void predict(TimestampNs reference_time, DurationNs delta) = 0;
 
+  // Clear algorithm history while retaining prepared numerical storage.
+  virtual void reset() {}
+
   // A checkpoint retains filter internals as well as the externally owned
   // model state. The model must outlive the original and the copy.
   virtual std::unique_ptr<FilterBase> clone() const

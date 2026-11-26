@@ -1,0 +1,17 @@
+{
+  "Id": "44444444-4444-4444-8444-444444444445",
+  "Name": "DefaultUkfEstimatorModel",
+  "PluginType": "rpp_interfaces::Model",
+  "PluginName": "rpp_localization::NavigationModel",
+  "Library": "rpp_localization",
+  "SubcomponentSpec": {},
+  "Subcomponents": {},
+  "ParentComponentInfo": {
+    "Id": "44444444-4444-4444-8444-444444444444",
+    "PluginType": "rpp_interfaces::Estimator",
+    "PluginName": "rpp_localization::Ukf",
+    "SlotName": "model",
+    "Library": "rpp_localization",
+    "IsLinked": false
+  }
+}

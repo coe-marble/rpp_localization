@@ -21,8 +21,8 @@
 #include "geometry_msgs/msg/twist_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "rpp_localization/srv/toggle_filter_processing.hpp"
-#include "rpp_localization/srv/set_pose.hpp"
+#include "rpp_ros_interfaces/srv/toggle_filter_processing.hpp"
+#include "rpp_ros_interfaces/srv/set_pose.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_srvs/srv/empty.hpp"
 #include "tf2/LinearMath/Transform.hpp"
@@ -79,9 +79,9 @@ public:
   void toggle_filter_processing_callback(
     const std::shared_ptr<rmw_request_id_t>/*request_header*/,
     const std::shared_ptr<
-      rpp_localization::srv::ToggleFilterProcessing::Request> req,
+      rpp_ros_interfaces::srv::ToggleFilterProcessing::Request> req,
     const std::shared_ptr<
-      rpp_localization::srv::ToggleFilterProcessing::Response> resp);
+      rpp_ros_interfaces::srv::ToggleFilterProcessing::Response> resp);
 
   //! @brief Loads all parameters from file
   //!
@@ -113,8 +113,8 @@ public:
   //! @return true if successful, false if not
   bool set_pose_srv_callback(
     const std::shared_ptr<rmw_request_id_t> request_header,
-    const std::shared_ptr<rpp_localization::srv::SetPose::Request> request,
-    std::shared_ptr<rpp_localization::srv::SetPose::Response> response);
+    const std::shared_ptr<rpp_ros_interfaces::srv::SetPose::Request> request,
+    std::shared_ptr<rpp_ros_interfaces::srv::SetPose::Response> response);
 
   //! @brief Service callback for manually enable the filter
   //! @param[in] request - N/A
@@ -159,7 +159,7 @@ protected:
   //! processing while still publishing.
   //! Uses a rpp_localization ToggleFilterProcessing service.
   //!
-  rclcpp::Service<rpp_localization::srv::ToggleFilterProcessing>::SharedPtr
+  rclcpp::Service<rpp_ros_interfaces::srv::ToggleFilterProcessing>::SharedPtr
     toggle_filter_processing_srv_;
 
   //! @brief Subscribes to the control input topic
@@ -175,7 +175,7 @@ protected:
   //! @brief Service that allows another node to change the current state and
   //! recieve a confirmation. Uses a custom SetPose service.
   //!
-  rclcpp::Service<rpp_localization::srv::SetPose>::SharedPtr
+  rclcpp::Service<rpp_ros_interfaces::srv::SetPose>::SharedPtr
     set_pose_service_;
 
   //! @brief Service that allows another node to enable the filter. Uses a

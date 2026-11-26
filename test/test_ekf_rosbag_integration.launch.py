@@ -27,7 +27,7 @@ def generate_test_description() -> tuple[LaunchDescription, dict[str, ExecutePro
 
     localization_node = Node(
         package="rpp_localization",
-        executable="localization_node",
+        executable="legacy_localization_node",
         name="localization_node",
         parameters=[str(parameters_file)],
         output="screen",

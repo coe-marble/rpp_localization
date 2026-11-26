@@ -1,0 +1,17 @@
+{
+  "Id": "77777777-7777-4777-8777-777777777778",
+  "Name": "DefaultEkfEstimatorModel",
+  "PluginType": "rpp_interfaces::Model",
+  "PluginName": "rpp_localization::NavigationModel",
+  "Library": "rpp_localization",
+  "SubcomponentSpec": {},
+  "Subcomponents": {},
+  "ParentComponentInfo": {
+    "Id": "77777777-7777-4777-8777-777777777777",
+    "PluginType": "rpp_interfaces::Estimator",
+    "PluginName": "rpp_localization::Ekf",
+    "SlotName": "model",
+    "Library": "rpp_localization",
+    "IsLinked": false
+  }
+}

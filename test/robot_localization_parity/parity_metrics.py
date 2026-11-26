@@ -56,26 +56,42 @@ def _wrap(angle: numpy.ndarray) -> numpy.ndarray:
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
-def compare(reference: Track, candidate: Track) -> dict[str, float]:
-    """Differences of candidate from reference, on the reference timestamps."""
+def compare(reference: Track, candidate: Track, *, timebase: Track | None = None) -> dict[str, float]:
+    """Compare on reference timestamps, or interpolate both onto an explicit clock.
+
+    Three-way comparisons use the same external reference clock. Otherwise an
+    early prior published before that reference starts can affect only one pair.
+    The default preserves the original pair's complete comparison window.
+    """
     a = reference.arrays()
     b = candidate.arrays()
     start = max(a["time"][0], b["time"][0])
     end = min(a["time"][-1], b["time"][-1])
-    inside = (a["time"] >= start) & (a["time"] <= end)
-    time = a["time"][inside]
+    if timebase is None or timebase is reference:
+        inside = (a["time"] >= start) & (a["time"] <= end)
+        time = a["time"][inside]
+        baseline = {name: value[inside] for name, value in a.items()}
+    else:
+        clock = numpy.sort(numpy.asarray(timebase.time))
+        time = clock[(clock >= start) & (clock <= end)]
+        baseline = {name: _interpolate(time, a["time"], a[name])
+                    for name in ("position", "yaw", "velocity", "position_variance")}
+    if time.size == 0:
+        raise ValueError("Tracks have no samples on the requested comparison clock")
 
-    position = _interpolate(time, b["time"], b["position"]) - a["position"][inside]
+    position = _interpolate(time, b["time"], b["position"]) - baseline["position"]
     distance = numpy.linalg.norm(position, axis=1)
-    yaw = _wrap(_interpolate(time, b["time"], b["yaw"]) - a["yaw"][inside])
+    yaw = _wrap(_interpolate(time, b["time"], b["yaw"]) - baseline["yaw"])
     velocity = numpy.linalg.norm(
-        _interpolate(time, b["time"], b["velocity"]) - a["velocity"][inside], axis=1)
-    sigma_a = numpy.sqrt(a["position_variance"][inside].sum(axis=1))
+        _interpolate(time, b["time"], b["velocity"]) - baseline["velocity"], axis=1)
+    sigma_a = numpy.sqrt(baseline["position_variance"].sum(axis=1))
     sigma_b = numpy.sqrt(_interpolate(time, b["time"], b["position_variance"]).sum(axis=1))
     valid = sigma_a > 0.0
 
     return {
         "samples": int(time.size),
+        "start_time": float(time[0]),
+        "end_time": float(time[-1]),
         "position_rms_m": float(numpy.sqrt(numpy.mean(distance ** 2))),
         "position_max_m": float(distance.max()),
         "final_position_difference_m": float(numpy.linalg.norm(

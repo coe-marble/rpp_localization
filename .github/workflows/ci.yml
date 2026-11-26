@@ -45,5 +45,12 @@ jobs:
           submodules: recursive
           token: ${{ secrets.RPP_CI_TOKEN || github.token }}
           persist-credentials: false
+      - name: Check out ROS interface definitions
+        uses: actions/checkout@v4
+        with:
+          repository: coe-marble/rpp_ros_interfaces
+          ref: main
+          path: libraries/rpp_ros_interfaces
+          persist-credentials: false
       - name: Run library CI
         run: bash libraries/rpp_localization/.github/scripts/ci.sh
