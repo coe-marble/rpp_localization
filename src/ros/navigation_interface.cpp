@@ -1,6 +1,6 @@
 #include <rpp_localization/ros/navigation_interface.hpp>
 #include <rpp_localization/ros/estimator_script_node.hpp>
-#include <rpp_localization/core/validation.hpp>
+#include <rpp_localization/ros/covariance_helpers.hpp>
 
 #include <tf2/LinearMath/Matrix3x3.hpp>
 #include <tf2/LinearMath/Quaternion.hpp>
@@ -481,7 +481,7 @@ void NavigationInterface::submit(std::uint16_t requested, const std::array<doubl
       const auto value = covariance(port.covariance_roles[row], port.covariance_roles[column]);
       const bool constrained = two_d_ && ((forced & (1u << port.covariance_roles[row])) || (forced & (1u << port.covariance_roles[column])));
       port.covariance[row * port.covariance_roles.size() + column] = constrained ? (row == column ? 1e-6 : 0.0) :
-        row == column ? validation::normalize_measurement_covariance(value).value : value;
+        row == column ? navigation_helpers::normalize_measurement_variance(value) : value;
     }
   }
   const auto code = node_.submit_measurement(port.index, port.values, port.covariance, *time);
@@ -726,7 +726,7 @@ void NavigationInterface::set_pose(const geometry_msgs::msg::PoseWithCovarianceS
       if (state_.tangent[row] == missing || state_.tangent[column] == missing) {continue;}
       const auto value = covariance[row * 6 + column];
       request.covariance[state_.tangent[row] * n + state_.tangent[column]] = row == column ?
-        validation::normalize_measurement_covariance(value).value : value;
+        navigation_helpers::normalize_measurement_variance(value) : value;
     }}
   if (two_d_) {
     constexpr std::array<std::size_t, 7> constrained{2, 3, 4, 8, 9, 10, 14};

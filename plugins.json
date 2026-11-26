@@ -1,58 +1,36 @@
 {
-    "Library": "rpp_localization",
-    "Plugins": [
-        {
-            "Type": "file",
-            "Path": "plugins/models/constant_acceleration_model15.hpp",
-            "Name": "ConstantAccelerationModel15"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/filters/ekf15_plugin.hpp",
-            "Name": "Ekf15",
-            "PluginType": "rpp_localization::LocalizationFilter15"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/filters/ukf15_plugin.hpp",
-            "Name": "Ukf15",
-            "PluginType": "rpp_localization::LocalizationFilter15"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/models/navigation_model.hpp",
-            "Name": "NavigationModel",
-            "PluginType": "rpp_interfaces::Model"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/filters/ekf_estimator.hpp",
-            "Name": "Ekf",
-            "PluginType": "rpp_interfaces::Estimator"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/filters/ukf_estimator.hpp",
-            "Name": "Ukf",
-            "PluginType": "rpp_interfaces::Estimator"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/filters/profiled_ekf.hpp",
-            "Name": "ProfiledEkf",
-            "PluginType": "rpp_interfaces::Estimator"
-        },
-        {
-            "Type": "file",
-            "Path": "plugins/filters/profiled_ukf.hpp",
-            "Name": "ProfiledUkf",
-            "PluginType": "rpp_interfaces::Estimator"
-        }
-    ],
-    "PluginTypes": [
-        {
-            "Path": "plugin_types/localization.capnp",
-            "Type": "file"
-        }
-    ]
+  "Library": "rpp_localization",
+  "Plugins": [
+    {
+      "Type": "file",
+      "Path": "plugins/models/navigation_model.hpp",
+      "Name": "NavigationModel",
+      "PluginType": "rpp_interfaces::Model"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/ekf_estimator.hpp",
+      "Name": "Ekf",
+      "PluginType": "rpp_interfaces::Estimator"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/ukf_estimator.hpp",
+      "Name": "Ukf",
+      "PluginType": "rpp_interfaces::Estimator"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/profiled_ekf.hpp",
+      "Name": "ProfiledEkf",
+      "PluginType": "rpp_interfaces::Estimator"
+    },
+    {
+      "Type": "file",
+      "Path": "plugins/filters/profiled_ukf.hpp",
+      "Name": "ProfiledUkf",
+      "PluginType": "rpp_interfaces::Estimator"
+    }
+  ],
+  "PluginTypes": []
 }

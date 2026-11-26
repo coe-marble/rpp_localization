@@ -1,20 +1,18 @@
-from launch import LaunchDescription
+"""Start the generic navigation estimator with its UKF configuration."""
+
+from pathlib import Path
+
 from ament_index_python.packages import get_package_share_directory
-import launch_ros.actions
-import os
-import yaml
-from launch.substitutions import EnvironmentVariable
-import pathlib
-import launch.actions
-from launch.actions import DeclareLaunchArgument
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+
 
 def generate_launch_description():
+    launch_file = Path(get_package_share_directory("rpp_localization")) / "launch/localization.launch.py"
     return LaunchDescription([
-        launch_ros.actions.Node(
-            package='rpp_localization',
-            executable='ukf_node',
-            name='ukf_filter_node',
-            output='screen',
-            parameters=[os.path.join(get_package_share_directory("rpp_localization"), 'params', 'ukf.yaml')],
-           ),
-])
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(str(launch_file)),
+            launch_arguments={"configuration": "ukf"}.items(),
+        ),
+    ])

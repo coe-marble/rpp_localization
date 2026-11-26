@@ -4,7 +4,29 @@ import json
 from pathlib import Path
 import shutil
 
+import yaml
+
 from rpp_plugin_registrator import plugin_id_from_name
+
+
+def _number(value):
+    if isinstance(value, list):
+        return [_number(item) for item in value]
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
+
+
+def upstream_parameters(bag: str, filter_type: str) -> tuple[dict, dict]:
+    path = Path(__file__).resolve().parent / "config" / f"test_{filter_type}_localization_node_bag{bag[-1]}.yaml"
+    sections = yaml.safe_load(path.read_text())
+    filter_parameters = next(v for k, v in sections.items() if k.endswith(f"_{filter_type}"))
+    pose_parameters = next(v for k, v in sections.items() if k.endswith("_pose"))
+    return ({key: _number(value) for key, value in filter_parameters["ros__parameters"].items()},
+            pose_parameters["ros__parameters"])
 
 
 def workspace(installed_share: Path, destination: Path, upstream: dict, *, replay: bool, profile=False) -> str:
@@ -13,7 +35,6 @@ def workspace(installed_share: Path, destination: Path, upstream: dict, *, repla
     # plugin folders. Required profiles are checked explicitly before launch.
     shutil.copytree(installed_share / ".rppws", destination / ".rppws",
                     ignore_dangling_symlinks=True)
-    noise = upstream.get("process_noise_covariance")
     world = upstream.get("world_frame", upstream.get("odom_frame", "odom"))
     body = upstream.get("base_link_frame", "base_link")
     for description in (destination / ".rppws/parts").rglob("description.json"):
@@ -22,10 +43,7 @@ def workspace(installed_share: Path, destination: Path, upstream: dict, *, repla
         if not path.is_file():
             continue
         overrides = {}
-        if plugin.endswith(("::Ekf15", "::Ukf15", "::ConstantAccelerationModel15")):
-            if noise is not None:
-                overrides["process_noise_covariance"] = noise
-        if plugin.endswith(("::Ukf15", "::Ukf")):
+        if plugin.endswith("::Ukf"):
             overrides.update({name: upstream[name] for name in ("alpha", "kappa", "beta") if name in upstream})
         if plugin == "rpp_localization::NavigationModel":
             overrides.update(world_frame=world, body_frame=body)
@@ -97,7 +115,7 @@ def validate_workspace(rpp_workspace: str, script_name: str, configuration: str)
                 raise RuntimeError(f"Localization profile identity mismatch at {path}")
 
 
-def generic(upstream: dict, rpp_workspace: str, filter_type: str) -> dict:
+def localization_parameters(upstream: dict, rpp_workspace: str, filter_type: str) -> dict:
     """Explicit translation, including source-specific masks and process noise."""
     odometry = upstream.get("odom0_config", [False] * 15)
     imu = upstream.get("imu0_config", [False] * 15)

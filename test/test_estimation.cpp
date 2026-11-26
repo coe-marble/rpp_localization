@@ -18,10 +18,6 @@
 #include "rpp_localization/estimation/replay.hpp"
 #include "rpp_localization/estimation/prepared_queue.hpp"
 #include "rpp_localization/estimation/async_replay.hpp"
-#include "rpp_localization/ros/benchmark_timing.hpp"
-#include "rpp_localization/filters/extended_kalman_filter.hpp"
-#include "rpp_localization/filters/unscented_kalman_filter.hpp"
-#include "rpp_localization/models/constant_acceleration_model.hpp"
 #include "rpp_localization/models/native_navigation15.hpp"
 
 namespace
@@ -85,26 +81,6 @@ TEST(ReplayStatistics, ComputesPopulationDeviationAndMergesWithoutAllocating)
   EXPECT_DOUBLE_EQ(first.states_mean, 3.0);
   EXPECT_NEAR(first.states_stddev(), std::sqrt(8.0 / 3.0), 1e-12);
   EXPECT_NE(first.json().find("\"states_stddev\":"), std::string::npos);
-}
-
-TEST(ReplayStatistics, LegacyRecordingHonorsBuildAndRuntimeFlags)
-{
-  BenchmarkTiming timing;
-  timing.configure(false, 1);
-  timing.replayed_states(99);
-  EXPECT_NE(timing.json().find("\"replay_statistics\":{\"count\":0"), std::string::npos);
-  timing.configure(true, 1);
-  {
-    NoAllocations guard;
-    timing.replayed_states(1); timing.replayed_states(3);
-  }
-  EXPECT_EQ(allocations, 0u);
-  if constexpr (benchmark_metrics_compiled) {
-    EXPECT_NE(timing.json().find("\"replay_statistics\":{\"count\":2,\"states_mean\":2,\"states_stddev\":1,\"states_max\":3}"),
-      std::string::npos);
-  } else {
-    EXPECT_NE(timing.json().find("\"replay_statistics\":{\"count\":0"), std::string::npos);
-  }
 }
 
 TEST(AsyncReplay, SpareIsIdleAndOnlyCatchesUpAfterAnExplicitFork)
@@ -606,61 +582,6 @@ TEST(Estimation, EkfAndUkfPrepareStorageForEveryConfiguredDimension)
   }
 }
 
-TEST(Estimation, NavigationModelAndFiltersPreserveLegacyPredictionAndCorrection)
-{
-  const e::Vector empty;
-  NativeNavigationModel15 native;
-  e::StateSubsetObservation observation(native.state_space(), {0, 1, StateMemberYaw});
-  e::Vector state = e::Vector::LinSpaced(STATE_SIZE, 0.1, -0.1);
-  state(StateMemberYaw) = 3.1;
-  state(StateMemberVx) = 1.0;
-  const e::Matrix p = 0.02 * e::Matrix::Identity(STATE_SIZE, STATE_SIZE);
-  const e::Matrix q = 0.01 * e::Matrix::Identity(STATE_SIZE, STATE_SIZE);
-  Measurement measurement;
-  measurement.measurement_ = e::Vector::Constant(STATE_SIZE, 0.15);
-  measurement.measurement_(StateMemberYaw) = -3.1;
-  measurement.covariance_ = 0.05 * e::Matrix::Identity(STATE_SIZE, STATE_SIZE);
-  measurement.update_vector_.assign(STATE_SIZE, false);
-  for (const auto index : {0, 1, static_cast<int>(StateMemberYaw)}) {
-    measurement.update_vector_[index] = true;
-  }
-  const e::Vector z = (e::Vector(3) << 0.15, 0.15, -3.1).finished();
-  const e::Matrix r = 0.05 * e::Matrix::Identity(3, 3);
-  ConstantAccelerationModel old_model(STATE_SIZE);
-  old_model.initialize_runtime();
-  old_model.set_process_noise_covariance(q);
-  old_model.set_state(state);
-  old_model.set_state_covariance(p);
-  rpp_localization::Ekf old_ekf(old_model);
-  e::Ekf ekf(native, {{&observation, std::numeric_limits<double>::infinity()}});
-  ASSERT_EQ(ekf.initialize(state, p, 0), e::Status::ok);
-  old_ekf.predict(100'000'000, 100'000'000);
-  ASSERT_EQ(ekf.predict(empty, 0.1 * q, 100'000'000, 100'000'000), e::Status::ok);
-  old_ekf.correct(measurement);
-  ASSERT_EQ(ekf.correct(0, z, r, empty, 100'000'000), e::Status::ok);
-  EXPECT_TRUE(ekf.state().isApprox(old_model.get_state(), 1e-9));
-  EXPECT_TRUE(ekf.covariance().isApprox(old_model.get_state_covariance(), 1e-9));
-
-  for (const double alpha : {0.001, 1.0}) {
-    ConstantAccelerationModel ukf_model(STATE_SIZE);
-    ukf_model.initialize_runtime();
-    ukf_model.set_state(state);
-    ukf_model.set_state_covariance(p);
-    rpp_localization::Ukf old_ukf(ukf_model);
-    old_ukf.initialize_runtime(q, false, alpha, 0.0, 2.0);
-    e::UkfOptions options;
-    options.alpha = alpha;
-    e::Ukf ukf(native, {{&observation, std::numeric_limits<double>::infinity()}}, options);
-    ASSERT_EQ(ukf.initialize(state, p, 0), e::Status::ok);
-    old_ukf.predict(100'000'000, 100'000'000);
-    ASSERT_EQ(ukf.predict(empty, 0.1 * q, 100'000'000, 100'000'000), e::Status::ok);
-    old_ukf.correct(measurement);
-    ASSERT_EQ(ukf.correct(0, z, r, empty, 100'000'000), e::Status::ok);
-    EXPECT_TRUE(ukf.state().isApprox(ukf_model.get_state(), 1e-7));
-    EXPECT_TRUE(ukf.covariance().isApprox(ukf_model.get_state_covariance(), 1e-7));
-  }
-}
-
 TEST(Estimation, RejectsIncompatibleBindingsAndBadData)
 {
   LinearProcess model(4);
@@ -678,36 +599,29 @@ TEST(Estimation, RejectsIncompatibleBindingsAndBadData)
 
 TEST(Estimation, ConcreteNavigationUsesPreparedControlsWithoutOwningTheEstimate)
 {
-  NativeNavigationModel15 native(true);
-  ConstantAccelerationModel original(STATE_SIZE);
-  original.initialize_runtime();
-  original.set_process_noise_covariance(e::Matrix::Zero(STATE_SIZE, STATE_SIZE));
-  original.set_control_params(std::vector<bool>(TWIST_SIZE, true), 1'000'000'000,
-    std::vector<double>(TWIST_SIZE, 2.0), std::vector<double>(TWIST_SIZE, 1.0),
-    std::vector<double>(TWIST_SIZE, 2.0), std::vector<double>(TWIST_SIZE, 1.0));
-  const e::Vector state = e::Vector::LinSpaced(STATE_SIZE, 0.1, -0.1);
-  const e::Matrix p = 0.02 * e::Matrix::Identity(STATE_SIZE, STATE_SIZE);
-  original.set_state(state);
-  original.set_state_covariance(p);
-  ControlCommand command;
-  command.stamp = 1'000'000'000;
-  command.control = state.segment(POSITION_V_OFFSET, TWIST_SIZE).array() + 0.25;
-  original.set_control(command);
-  original.predict(original.get_state_unsafe(), original.get_state_covariance_unsafe(),
-    1'100'000'000, 100'000'000);
-
-  e::Vector input = e::Vector::Constant(9, 0.25);
+  NativeNavigationModel15 model(true);
+  const e::Vector state = e::Vector::Zero(STATE_SIZE);
+  e::Vector input = e::Vector::Zero(9);
+  input(0) = 2.0;
+  input(5) = 1.0;
   input.tail(3).setOnes();
   e::Vector next(STATE_SIZE);
-  e::Matrix a(STATE_SIZE, STATE_SIZE);
+  e::Matrix jacobian(STATE_SIZE, STATE_SIZE);
+  bool predicted = false;
   {
     NoAllocations guard;
-    EXPECT_TRUE(native.predict_and_linearize(state, input, 1'000'000'000,
-      100'000'000, 0, next, a));
+    predicted = model.predict_and_linearize(state, input, 1'000'000'000,
+      100'000'000, 0, next, jacobian);
   }
+  ASSERT_TRUE(predicted);
   EXPECT_EQ(allocations, 0u);
-  EXPECT_TRUE(next.isApprox(original.get_state(), 1e-10));
-  EXPECT_TRUE((a * p * a.transpose()).isApprox(original.get_state_covariance(), 1e-10));
+  EXPECT_TRUE(state.isZero());
+  EXPECT_NEAR(next(StateMemberX), 0.01, 1e-12);
+  EXPECT_NEAR(next(StateMemberVx), 0.2, 1e-12);
+  EXPECT_NEAR(next(StateMemberAx), 2.0, 1e-12);
+  EXPECT_NEAR(next(StateMemberYaw), 0.01, 1e-12);
+  EXPECT_NEAR(next(StateMemberVyaw), 0.1, 1e-12);
+  EXPECT_TRUE(jacobian.allFinite());
 }
 
 TEST(Estimation, UkfModelFailureAndUnsignedTimeBoundariesPreserveTheEstimate)

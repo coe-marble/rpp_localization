@@ -115,5 +115,5 @@ class Processes:
             return {"window_wall_seconds": time.monotonic() - self._started if self._started else None,
                     "cpu_window": "bag playback through output drain; all process threads",
                     "memory_window": "process lifetime peak RSS, including startup",
-                    "worker_cpu_window": "same playback/drain window; Linux /proc thread ticks; generic only",
+                    "worker_cpu_window": "same playback/drain window; Linux /proc thread ticks; rpp_estimator only",
                     "processes": processes}

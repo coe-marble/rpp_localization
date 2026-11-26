@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rpp_localization/core/filter_common.hpp"
+#include "rpp_localization/models/navigation_state.hpp"
 #include "rpp_localization/estimation/model.hpp"
 
 #include <array>
@@ -192,20 +192,20 @@ inline bool NativeNavigationModel15::evaluate(
 
   // (1) Apply control terms, which are actually accelerations
   state(StateMemberVroll) +=
-    (prepared_control_ ? input(ControlMemberVroll) : 0.0) * delta_seconds;
+    (prepared_control_ ? input(ControlMemberAroll) : 0.0) * delta_seconds;
   state(StateMemberVpitch) +=
-    (prepared_control_ ? input(ControlMemberVpitch) : 0.0) * delta_seconds;
+    (prepared_control_ ? input(ControlMemberApitch) : 0.0) * delta_seconds;
   state(StateMemberVyaw) +=
-    (prepared_control_ ? input(ControlMemberVyaw) : 0.0) * delta_seconds;
+    (prepared_control_ ? input(ControlMemberAyaw) : 0.0) * delta_seconds;
 
   state(StateMemberAx) = ((prepared_control_ && input(6) != 0.0) ?
-    input(ControlMemberVx) :
+    input(ControlMemberAx) :
     state(StateMemberAx));
   state(StateMemberAy) = ((prepared_control_ && input(7) != 0.0) ?
-    input(ControlMemberVy) :
+    input(ControlMemberAy) :
     state(StateMemberAy));
   state(StateMemberAz) = ((prepared_control_ && input(8) != 0.0) ?
-    input(ControlMemberVz) :
+    input(ControlMemberAz) :
     state(StateMemberAz));
 
   // (2) Project the state forward: x = Ax + Bu (really, x = f(x, u))

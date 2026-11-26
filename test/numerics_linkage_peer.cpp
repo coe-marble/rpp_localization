@@ -1,28 +1,19 @@
 #include <memory>
 
-#include "rpp_localization/filters/unscented_kalman_filter.hpp"
-#include "rpp_localization/models/constant_acceleration_model.hpp"
+#include <rpp_localization/estimation/ukf.hpp>
+#include <rpp_localization/models/native_navigation15.hpp>
 
 namespace rpp_localization::test
 {
-
-std::unique_ptr<ModelBase> make_peer_model()
+std::unique_ptr<estimation::ProcessModel> make_peer_model()
 {
-  auto model = std::make_unique<ConstantAccelerationModel>(STATE_SIZE);
-  model->initialize_runtime();
-  return model;
+  return std::make_unique<NativeNavigationModel15>();
 }
 
-std::unique_ptr<FilterBase> make_peer_filter(ModelBase & model)
+std::unique_ptr<estimation::GaussianFilter> make_peer_filter(
+  const estimation::ProcessModel& model)
 {
-  return std::make_unique<Ukf>(model);
+  return std::make_unique<estimation::Ukf>(
+    model, std::vector<estimation::ObservationBinding>{});
 }
-
-using WrapStateAngles = void (*)(Eigen::VectorXd &);
-
-WrapStateAngles peer_wrap_function()
-{
-  return &filter_utilities::wrap_state_angles;
-}
-
 }  // namespace rpp_localization::test

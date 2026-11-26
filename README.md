@@ -162,34 +162,36 @@ interval. Replay does not recompute closed-loop control or state-dependent noise
 under the corrected trajectory. Use a model-specific replay policy if that is
 required by an application.
 
-UKF defaults to the legacy retained-sigma correction policy.
-`legacy_ukf_correction=false` selects the innovation covariance policy. Filter
-settings, measurement layouts, gating thresholds, and model control layout
-belong to RPP component parameters; they are not inferred from ROS YAML.
+UKF defaults to retained-sigma correction: it uses propagated sigma points and
+their predicted observation covariance. `legacy_ukf_correction=false`
+selects the innovation-covariance policy. Filter settings, measurement layouts,
+gating thresholds, and model control layout belong to RPP component parameters.
 
 Build and run with colcon
 -------------------------
 
-From the existing ROS/RPP environment; these commands are provided for the
-user and have not been executed during this change. Registering compiles plugins.
+From the ROS workspace root, with RPP and its C++ runtime installed, register
+the source libraries on first use:
 
 ```sh
-cd /home/luka/ros2_ws
 source /opt/ros/lyrical/setup.bash
-colcon build --packages-select rpp_ros_interfaces --cmake-args -DBUILD_TESTING=OFF
 source install/setup.bash
-
-rpp library register /home/luka/fer/rpp/rpp_dev/src/rpp_interfaces --link
-colcon build --base-paths /home/luka/fer/rpp/rpp_dev/src/rpp_interfaces \
-  --packages-select rpp_interfaces --cmake-args -DBUILD_TESTING=OFF
-source install/setup.bash
+rpp library register src/rpp_dev/src/rpp_interfaces --link
 rpp library register src/rpp_libraries/rpp_localization --link
-colcon build --packages-select rpp_localization --cmake-args \
+colcon build --packages-select rpp_interfaces rpp_localization --cmake-args \
   -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
-
 ros2 launch rpp_localization localization.launch.py
-# Other examples:
+```
+
+For already registered libraries, use `rpp library refresh rpp_localization --jobs 4`
+after changing plugin code. Refresh shared interface dependencies first when
+their schemas or headers change. Rebuilding the ROS node and refreshing its
+registered plugins are separate operations.
+
+Select a configured estimator or navigation variant with:
+
+```sh
 ros2 launch rpp_localization localization.launch.py configuration:=ukf
 ros2 launch rpp_localization localization.launch.py configuration:=ekf_2d two_d_mode:=true
 ros2 launch rpp_localization localization.launch.py configuration:=ekf_control use_control:=true
@@ -198,39 +200,31 @@ ros2 launch rpp_localization localization.launch.py configuration:=ekf_control u
 Launch arguments also accept `params_file` and `rpp_workspace`. Start from
 `params/navigation.yaml` for navigation or `params/estimator.yaml` for numeric
 messages only. `estimator_script_node` and `localization_node` run the generic
-adapter. `ekf_node` and `ukf_node` select navigation defaults but accept other
-estimator configurations. Startup `activate_on_start` defaults to true.
+adapter. `ekf_node`, `ukf_node`, `ekf.launch.py`, and `ukf.launch.py`
+select the corresponding navigation configuration. Startup
+`activate_on_start` defaults to true.
 
-Tests and benchmark metrics default to OFF. Enable `BUILD_TESTING` and
-`RPP_LOCALIZATION_ENABLE_BENCHMARK_METRICS` explicitly for benchmark runs as
-described in `test/robot_localization_parity/README.md`. Existing CMake caches
-retain previously selected values; changing a default does not reset them.
+The library registers `NavigationModel`, `Ekf`, `Ukf`, `ProfiledEkf`, and
+`ProfiledUkf`. Its plugin contracts come from `rpp_interfaces`; it declares no
+local plugin types. Numerical consumers link `rpp_localization::numerics`
+without the ROS library.
 
-The original fixed-size EKF and production navigation model remain unchanged.
-The previous ROS adapters are available as `legacy_localization_node`,
-`legacy_ekf_node`, `legacy_ukf_node`, and `legacy_localization.launch.py`, using
-`params/localization.yaml`. The optional MORE bridge remains outside default
-registration. Numerical consumers can link `rpp_localization::numerics` without
-the ROS library. The shared Cap'n Proto contract remains version 1, and no
-`rpp_dev` package changes are required.
+Tests and measurements
+-----------------------
 
-Verification and performance
-----------------------------
+`BUILD_TESTING` enables generic numerical, cross-translation-unit, and Python
+parity-metric tests. The Python cases check interpolation, angular wrapping,
+missing overlap, summaries, and GNSS alignment without starting ROS.
+`RPP_LOCALIZATION_ENABLE_PLUGIN_TESTS` adds registered estimator/model and
+threaded ROS node tests. The source library must be registered before building
+those targets.
 
-Core allocation assertions, replay rollback/order cases, queue transfer cases,
-registered routing/RPC tests, and a threaded ROS navigation/reset integration
-case are included. Enable `BUILD_TESTING` and
-`RPP_LOCALIZATION_ENABLE_PLUGIN_TESTS` after registration to build the latter.
-Registered adapters own their compiled schemas; localization does not compile
-an explicit generated schema source list. Legacy rosbag tests remain opt-in via
-`RPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS`.
+`RPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS` adds a generic-node navigation
+bag test. `RPP_LOCALIZATION_ENABLE_BAG_BENCHMARKS` compares the generic stack
+with robot_localization on the six EKF/UKF bag cases.
+`RPP_LOCALIZATION_ENABLE_BENCHMARK_METRICS` enables the optional timing and
+worker allocation measurements and the instrumented replay-counter tests.
+CI enables this flag alongside the plugin and navigation bag tests.
 
-No build, registration, or test has been run for this rewrite. Static review
-cannot establish the complete stack's allocation count or timing. The saved
-`benchmarks/results/generic-matrices-2026-11-25.txt` records the user's earlier
-matrix experiment; it does not measure this worker/interface/replay pipeline.
-
-The original six EKF/UKF bag cases can compare the generic stack with the previous
-implementation and `robot_localization`, retaining their configurations and
-accuracy limits. See [bag benchmark instructions](test/robot_localization_parity/README.md)
-for colcon commands and the CPU/memory/trajectory report.
+See [bag benchmark instructions](test/robot_localization_parity/README.md)
+for commands, replay settings, CPU/memory columns, and saved trajectory reports.

@@ -18,7 +18,7 @@ namespace rpp_localization
 inline constexpr bool benchmark_metrics_compiled = RPP_LOCALIZATION_ENABLE_BENCHMARK_METRICS != 0;
 // Optional benchmark instrumentation. Each operation has one execution owner:
 // the generic worker owns Estimation/Predict/Correct and the ROS executor owns
-// Replay. Legacy operations all belong to its ROS executor. The stats service
+// Replay. The stats service
 // quiesces the worker and serializes between ROS callbacks. Recording neither
 // allocates nor locks. Histograms give upper bounds within 6.25% above 16 ns.
 class BenchmarkTiming
@@ -78,13 +78,6 @@ public:
     }
   }
 
-  void replayed_states(std::uint64_t states) noexcept
-  {
-    if constexpr (benchmark_metrics_compiled) {
-      if (enabled_) {replay_.observe(states);}
-    }
-  }
-
   // Cold path only. A missing CPU clock is reported as zero samples, never as
   // process CPU or wall time pretending to be execution-thread CPU.
   std::string json(const estimation::ReplayStatistics* replay = nullptr) const
@@ -105,7 +98,7 @@ public:
     }
     out << "},\"queue_wait_wall\":";
     queue_wait_.write(out);
-    out << ",\"replay_statistics\":" << (replay ? replay : &replay_)->json();
+    out << ",\"replay_statistics\":" << (replay ? replay->json() : estimation::ReplayStatistics{}.json());
     out << '}';
     return out.str();
   }
@@ -175,7 +168,6 @@ private:
   struct OperationSamples {Samples cpu, wall;};
   std::array<OperationSamples, 4> operations_{};
   Samples queue_wait_;
-  estimation::ReplayStatistics replay_;
   std::uint64_t budget_ns_{0}, budget_overruns_{0};
   bool enabled_{false};
 };

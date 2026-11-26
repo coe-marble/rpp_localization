@@ -10,7 +10,7 @@ namespace rpp_localization::estimation
 
 enum class UkfCorrection
 {
-  // Reproduce the current localization UKF: retain propagated sigma points
+  // Retain propagated sigma points
   // before additive Q, and subtract K * predicted_observation_covariance * K'.
   legacy,
   // Regenerate from the posterior including Q, and subtract K * innovation * K'.
@@ -261,7 +261,7 @@ private:
     }
     sigma_.col(0) = state_;
     for (Eigen::Index axis = 0; axis < size_; ++axis) {
-      // Keep legacy sigma generation; wrapping happens in residuals and means.
+      // Keep sigma coordinates unwrapped; residuals and means handle angles.
       sigma_.col(axis + 1) = state_ + root_.col(axis);
       sigma_.col(axis + 1 + size_) = state_ - root_.col(axis);
     }

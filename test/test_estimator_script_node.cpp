@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include <rpp_localization/ros/estimator_script_node.hpp>
-#include <rpp_localization/ros/ros_filter_base.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rpp_ros_interfaces/msg/numeric_interface.hpp>
@@ -10,7 +9,6 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -25,45 +23,6 @@ class EstimatorNodeTest : public ::testing::Test
   void SetUp() override {rclcpp::init(0, nullptr);}
   void TearDown() override {rclcpp::shutdown();}
 };
-
-class LegacyReplayProbe final : public rpp_localization::RosFilterBase
-{
-  static rclcpp::NodeOptions options()
-  {rclcpp::NodeOptions value; value.arguments({"legacy_replay_probe"}); return value;}
-public:
-  LegacyReplayProbe() : RosFilterBase(options(), false, "ekf") {}
-  void profiling(bool enabled) {benchmark_.configure(enabled, 1);}
-  void history(std::initializer_list<rpp_localization::TimestampNs> times)
-  {
-    filter_state_history_.clear();
-    for (const auto time : times) {
-      auto state = std::make_shared<rpp_localization::FilterState>();
-      state->_state = Eigen::VectorXd::Zero(15);
-      state->_estimate_error_covariance = Eigen::MatrixXd::Identity(15, 15);
-      state->_last_measurement_time = time;
-      filter_state_history_.push_back(std::move(state));
-    }
-  }
-  bool rewind(rpp_localization::TimestampNs time) {return revert_to(time);}
-  std::string metrics() const {return benchmark_.json();}
-};
-
-TEST_F(EstimatorNodeTest, LegacyReplayStatisticsCountTheActualRollbackTail)
-{
-  LegacyReplayProbe legacy;
-  legacy.profiling(true);
-  legacy.history({10, 20, 30, 40}); ASSERT_TRUE(legacy.rewind(15));
-  legacy.history({10, 20, 30}); ASSERT_TRUE(legacy.rewind(20));
-  legacy.profiling(false);
-  legacy.history({10, 20}); ASSERT_TRUE(legacy.rewind(10));
-  const auto json = legacy.metrics();
-  if constexpr (rpp_localization::benchmark_metrics_compiled) {
-    EXPECT_NE(json.find("\"replay_statistics\":{\"count\":2,\"states_mean\":2,\"states_stddev\":1,\"states_max\":3}"),
-      std::string::npos);
-  } else {
-    EXPECT_NE(json.find("\"replay_statistics\":{\"count\":0"), std::string::npos);
-  }
-}
 
 TEST_F(EstimatorNodeTest, ReplayCatchesUpAndPublishesTheAdoptedStateAfterSimulationTimeStops)
 {

@@ -24,6 +24,7 @@ rpp library register "$PWD/libraries/rpp_localization" --link
 colcon build --base-paths libraries/rpp_localization --symlink-install --cmake-args \
   -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python \
   -DRPP_LOCALIZATION_ENABLE_PLUGIN_TESTS=ON \
+  -DRPP_LOCALIZATION_ENABLE_BENCHMARK_METRICS=ON \
   -DRPP_LOCALIZATION_ENABLE_ROSBAG_INTEGRATION_TESTS=ON
 source install/setup.bash
 
