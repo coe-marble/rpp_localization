@@ -81,7 +81,8 @@ TEST_F(EstimatorNodeTest, ReplayCatchesUpAndPublishesTheAdoptedStateAfterSimulat
     request->name = configuration == "ekf" ? "DefaultEkfEstimator" : "DefaultUkfEstimator";
     auto response = reload->async_send_request(request);
     ASSERT_TRUE(spin_until([&] {return response.wait_for(0s) == std::future_status::ready;}, false));
-    EXPECT_TRUE(response.get()->success);
+    const auto result = response.get();
+    ASSERT_TRUE(result->success) << result->message;
     ASSERT_TRUE(spin_until([&] {return estimator->layout_revision() > revision;}, false));
     estimate.reset();
     ASSERT_EQ(estimator->submit_prediction(empty, q, 2'000'000'000, 1'000'000'000, 0), c::CODE_OK);

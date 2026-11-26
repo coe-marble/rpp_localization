@@ -173,7 +173,7 @@ void EstimatorScriptNode::build_runtime()
   const auto workspace = h::parameter<std::string>(*this, "rpp_workspace", "");
   data_manager_ = std::make_unique<rpp::RppDataManager>(rpp::RPP_HOME,
     workspace.empty() ? ament_index_cpp::get_package_share_path(library).string() : workspace);
-  rpp::ConcurrentComponentRuntimeBuilder builder(*data_manager_);
+  rpp::ConcurrentComponentRuntimeBuilder builder(*data_manager_, rpp::ClockOptions{}, true);
   runtime_ = std::make_unique<rpp::ConcurrentScriptRuntime>(builder.build_script({
     rpp::LibraryScript{library, name}, configuration.empty() ? std::nullopt :
       std::optional<std::string>{configuration}, std::nullopt}));

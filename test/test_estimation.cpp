@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -498,7 +499,7 @@ TEST(Estimation, AngleResidualUsesConfiguredCoordinates)
   ASSERT_EQ(filter.initialize(state, 0.1 * e::Matrix::Identity(2, 2), 0), e::Status::ok);
   ASSERT_EQ(filter.correct(0, e::Vector::Constant(1, -3.1),
       e::Matrix::Constant(1, 1, 0.1), empty, 0), e::Status::ok);
-  EXPECT_NEAR(std::abs(filter.state()(1)), PI, 1e-12);
+  EXPECT_NEAR(std::abs(filter.state()(1)), std::acos(-1.0), 1e-12);
   EXPECT_DOUBLE_EQ(filter.state()(0), 0.0);
 }
 
